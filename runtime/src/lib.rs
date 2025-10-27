@@ -330,6 +330,8 @@ mod runtime {
     // custom
     #[runtime::pallet_index(40)]
     pub type Projects = pallet_projects::Pallet<Runtime>;
+    #[runtime::pallet_index(41)]
+    pub type Reputation = pallet_reputation::Pallet<Runtime>;
 }
 
 cumulus_pallet_parachain_system::register_validate_block! {

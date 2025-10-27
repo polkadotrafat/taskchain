@@ -9,7 +9,7 @@ license = "Unlicense"
 repository = "https://github.com/r0gue-io/base-parachain"
 
 [workspace]
-members = ["node", "pallets/pallet-projects", "runtime"]
+members = ["node", "pallets/projects", "pallets/reputation", "runtime"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -126,4 +126,5 @@ parachains-common = { version = "21.0.0", default-features = false }
 parachain-info = { version = "0.20.0", package = "staging-parachain-info", default-features = false }
 
 # custom
-pallet-projects = { path = "pallets/pallet-projects", default-features = false }
+pallet-projects = { path = "pallets/projects", default-features = false }
+pallet-reputation = { path = "pallets/reputation", default-features = false }

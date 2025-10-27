@@ -21,7 +21,7 @@ pub mod pallet {
     use scale_info::prelude::ops::Add;
     use sp_runtime::{
 		traits::{ One, AccountIdConversion, Saturating}
-		 };
+};
 
     type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 

@@ -329,3 +329,12 @@ impl pallet_projects::Config for Runtime {
     type ReviewPeriod = ReviewPeriod;
     type WeightInfo = (); // Configure based on benchmarking results.
 }
+
+impl pallet_reputation::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type ProjectId = <Projects as pallet_projects::Config>::ProjectId;  // ← Key line
+    type GovernanceOrigin = EnsureRoot<AccountId>;
+    type MaxSkills = ConstU32<10>;
+    type MaxMetadata = ConstU32<256>;
+    type WeightInfo = ();
+}
