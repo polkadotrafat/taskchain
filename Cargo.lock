@@ -7711,6 +7711,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-reputation"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-balances",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-root-testing"
 version = "16.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8174,6 +8189,7 @@ dependencies = [
  "pallet-collator-selection",
  "pallet-message-queue",
  "pallet-projects",
+ "pallet-reputation",
  "pallet-session",
  "pallet-sudo",
  "pallet-timestamp",

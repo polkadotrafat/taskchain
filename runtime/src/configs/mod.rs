@@ -318,6 +318,7 @@ parameter_types! {
     pub const ProjectsPalletId: PalletId = PalletId(*b"tsk/proj");
     pub const MaxApplicantsLength: u32 = 100;
     pub const ReviewPeriod: BlockNumber = 10000;
+    pub const MaxJurors: u32 = 100;
 }
 
 impl pallet_projects::Config for Runtime {
@@ -332,9 +333,10 @@ impl pallet_projects::Config for Runtime {
 
 impl pallet_reputation::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
-    type ProjectId = <Projects as pallet_projects::Config>::ProjectId;  // ← Key line
+    type Currency = Balances;
+    type ProjectId = u32;
     type GovernanceOrigin = EnsureRoot<AccountId>;
-    type MaxSkills = ConstU32<10>;
     type MaxMetadata = ConstU32<256>;
     type WeightInfo = ();
+    type MaxJurors = MaxJurors;
 }

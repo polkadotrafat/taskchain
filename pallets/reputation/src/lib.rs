@@ -10,12 +10,13 @@ mod tests;
 
 use frame_support::{
     dispatch::DispatchResult,
-    traits::Currency,
+    traits::{Currency, Get},
+    BoundedVec,
 };
 use sp_runtime::Permill;
 
 
-pub trait ReputationInterface<AccountId, Balance, ProjectId, BlockNumber> {
+pub trait ReputationInterface<AccountId, Balance, ProjectId, BlockNumber, MaxJurors: Get<u32>> {
     fn on_project_completed(
         freelancer: &AccountId,
         project_value: Balance,
@@ -34,7 +35,7 @@ pub trait ReputationInterface<AccountId, Balance, ProjectId, BlockNumber> {
         min_tier: JurorTier, 
         exclude: &[AccountId],
         count: u32,
-    ) -> Vec<AccountId>;
+    ) -> BoundedVec<AccountId, MaxJurors>;
 
     fn on_jury_vote(
         juror: &AccountId,
@@ -43,19 +44,21 @@ pub trait ReputationInterface<AccountId, Balance, ProjectId, BlockNumber> {
 }
 
 #[frame_support::pallet]
+
 pub mod pallet {
     use super::*;
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
     use frame_support::{BoundedVec};
+    use frame_system::WeightInfo;
     use scale_info::TypeInfo;
-    use codec::{MaxEncodedLen};
+    use codec::{Encode, Decode, MaxEncodedLen};
     use scale_info::prelude::ops::Add;
     use sp_runtime::{
-		traits::{ One, AccountIdConversion, Saturating}
+		traits::{ Saturating}
     };
 
-    type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+    pub type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 
     #[pallet::pallet]
@@ -93,12 +96,13 @@ pub mod pallet {
     }
 
     #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+    #[scale_info(skip_type_params(T))]
     pub struct Attestation<T: Config> {
         pub attestor: AttestorType,
         pub project_id: T::ProjectId,  // Uses the same type
         pub outcome: AttestationOutcome,
         pub value: BalanceOf<T>,
-        pub timestamp: T::BlockNumber,
+        pub timestamp: BlockNumberFor<T>,
         pub metadata: BoundedVec<u8, T::MaxMetadata>,
     }
 
@@ -117,7 +121,9 @@ pub mod pallet {
         Neutral,
     }
 
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+
+
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, Default)]
     pub struct WeightConfig {
         pub completion_weight: u32,
         pub dispute_penalty: u32,
@@ -127,7 +133,7 @@ pub mod pallet {
         pub activity_bonus: u32,
     }
 
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, Default, MaxEncodedLen)] 
     pub struct GlobalReputationStats {
         pub total_users: u32,
         pub average_score: u32,
@@ -136,7 +142,7 @@ pub mod pallet {
         pub min_score: u32,
     }
 
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, MaxEncodedLen, TypeInfo, Debug, Copy)]
+    #[derive(Encode, Decode, Clone, PartialEq, PartialOrd, Eq, MaxEncodedLen, TypeInfo, Debug, Copy)]
     pub enum JurorTier {
         Ineligible, // Not qualified or staked
         Bronze,     // Can judge small disputes
@@ -153,7 +159,7 @@ pub mod pallet {
     #[pallet::config]
     pub trait Config: frame_system::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-        
+        type WeightInfo: WeightInfo;
         type GovernanceOrigin: EnsureOrigin<Self::RuntimeOrigin>;
         /// Currency
         type Currency: Currency<Self::AccountId>;
@@ -163,12 +169,11 @@ pub mod pallet {
             + From<u32> + Into<u32>;
         
         #[pallet::constant]
-        type MaxSkills: Get<u32>;
-        
-        #[pallet::constant]
         type MaxMetadata: Get<u32>;
+
+        #[pallet::constant]
+        type MaxJurors: Get<u32>;
         
-        type WeightInfo: WeightInfo;
     }
 
 
@@ -224,7 +229,7 @@ pub mod pallet {
         },
         WeightsUpdated,
         GlobalStatsUpdated,
-        JurorTierUpdated { account: T::AccountId, new_tier: JurorTier },
+        JurorTierUpdated { account: T::AccountId},
     }
 
     #[pallet::error]
@@ -280,10 +285,22 @@ pub mod pallet {
         #[pallet::weight(Weight::default())]
         pub fn update_weights(
             origin: OriginFor<T>,
-            new_weights: WeightConfig,
+            completion_weight: u32,
+            dispute_penalty: u32,
+            arbitration_bonus: u32,
+            jury_weight: u32,
+            time_decay_rate: Permill,
+            activity_bonus: u32,
         ) -> DispatchResult {
-            // To be modified
             T::GovernanceOrigin::ensure_origin(origin)?;// Not optimal
+            let new_weights = WeightConfig {
+                completion_weight,
+                dispute_penalty,
+                arbitration_bonus,
+                jury_weight,
+                time_decay_rate,
+                activity_bonus,
+            };
             ReputationWeights::<T>::put(new_weights);
             Self::deposit_event(Event::WeightsUpdated);
             Ok(())
@@ -302,14 +319,13 @@ pub mod pallet {
 
             // 2. Run a *simplified, on-chain* calculation to determine the tier.
             //    This calculation MUST be cheap. It uses integer math and the raw stats.
-            let on_chain_calculated_tier = Self::calculate_tier_from_stats(&stats);
+            let on_chain_calculated_tier = Self::calculate_tier_from_stats::<BalanceOf<T>, BlockNumberFor<T>>(&stats);
 
             // 3. Update the storage with the newly verified tier.
             JurorTiers::<T>::insert(&who, on_chain_calculated_tier);
 
             Self::deposit_event(Event::JurorTierUpdated {
-                account: who,
-                new_tier: on_chain_calculated_tier,
+                account: who
             });
 
             Ok(())
@@ -410,25 +426,23 @@ pub mod pallet {
         pub(crate) fn internal_get_eligible_jurors(
             min_tier: JurorTier, // e.g., We need at least Silver jurors
             exclude: &[T::AccountId],
-            count: u32,
-        ) -> Vec<T::AccountId> {
-            let eligible_jurors: Vec<T::AccountId> = JurorTiers::<T>::iter()
-                .filter(|(account, tier)| *tier >= min_tier && !exclude.contains(account))
-                .map(|(account, _tier)| account)
-                .take(200) // Take a reasonable number to prevent huge loops
-                .collect();
-
-            // Now, use on-chain randomness to select `count` from this list.
-            // This part is left for the arbitration pallet to implement.
-            // The reputation pallet's job is just to provide the pool.
+            _count: u32,
+        ) -> BoundedVec<T::AccountId, T::MaxJurors> {
+            let mut eligible_jurors = BoundedVec::<T::AccountId, T::MaxJurors>::new();
+            for (account, tier) in JurorTiers::<T>::iter() {
+                if tier >= min_tier && !exclude.contains(&account) {
+                    if eligible_jurors.try_push(account).is_err() {
+                        // We have reached the maximum number of jurors.
+                        break;
+                    }
+                }
+            }
             eligible_jurors
         }
 
         pub fn calculate_tier_from_stats<Balance, BlockNumber>(
-            stats: &ReputationData<Balance, BlockNumber>,
+            stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
         ) -> JurorTier
-        where
-            Balance: Into<u128> + Copy,
         {
             // Define the tier thresholds. These can be governed constants.
             const GOLD_PROJECTS: u32 = 50;
@@ -443,7 +457,7 @@ pub mod pallet {
                 return JurorTier::Ineligible;
             }
 
-            let earned_as_u128: u128 = stats.total_earned.into();
+            let earned_as_u128: u128 = stats.total_earned.try_into().unwrap_or(0);
 
             if stats.projects_completed >= GOLD_PROJECTS && earned_as_u128 >= GOLD_EARNED {
                 JurorTier::Gold
@@ -464,7 +478,8 @@ impl<T: pallet::Config> ReputationInterface<
     T::AccountId,
     pallet::BalanceOf<T>, 
     T::ProjectId,
-    T::BlockNumber,
+    frame_system::pallet_prelude::BlockNumberFor<T>,
+    T::MaxJurors,
 > for Pallet<T> {
     fn on_project_completed(
         freelancer: &T::AccountId,
@@ -495,7 +510,7 @@ impl<T: pallet::Config> ReputationInterface<
         min_tier: JurorTier, 
         exclude: &[T::AccountId],
         count: u32,
-    ) -> Vec<T::AccountId> {
+    ) -> BoundedVec<T::AccountId, T::MaxJurors> {
         Self::internal_get_eligible_jurors(min_tier, exclude, count)
     }
 }
