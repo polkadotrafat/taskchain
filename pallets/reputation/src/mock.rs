@@ -95,7 +95,10 @@ impl pallet_reputation::Config for Test {
     type GovernanceOrigin = EnsureRoot<Self::AccountId>;
     type MaxMetadata = ConstU32<256>;
     type WeightInfo = ();
-    type MaxJurors = ConstU32<100>;
+    type MaxJurors = ConstU32<500>;
+    type MaxGoldJurors = ConstU32<100>;
+    type MaxSilverJurors = ConstU32<200>;
+    type MaxBronzeJurors = ConstU32<200>;
 }
 
 // Build genesis storage according to the mock runtime.

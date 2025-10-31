@@ -15,6 +15,7 @@ serde.workspace = true
 scale-info.workspace = true
 sp-runtime.workspace = true
 pallet-balances.workspace = true
+pallet-reputation = { path = "../reputation", default-features = false, version = "0.1.0" }
 
 [dev-dependencies]
 sp-core.workspace = true
@@ -31,5 +32,6 @@ std = [
   "scale-info/std",
   "sp-runtime/std",
   "pallet-balances/std",
+  "pallet-reputation/std",
 ]
 

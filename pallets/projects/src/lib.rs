@@ -16,6 +16,7 @@ pub mod pallet {
     use frame_support::{BoundedVec,PalletId, 
         traits::{Currency, LockableCurrency, ExistenceRequirement, WithdrawReasons}
     };
+    use pallet_reputation::ReputationInterface;
     use scale_info::TypeInfo;
     use codec::{MaxEncodedLen};
     use scale_info::prelude::ops::Add;
@@ -87,6 +88,9 @@ pub mod pallet {
             + sp_runtime::traits::Zero + Add<Output = Self::ProjectId> 
             + From<u32> + Into<u32>;
 
+        /// The reputation interface
+        type Reputation: ReputationInterface<Self::AccountId, BalanceOf<Self>, Self::ProjectId, BlockNumberFor<Self>, Self::MaxApplicants>;
+
         #[pallet::constant]
         /// The period within which a client must review submitted work
         type ReviewPeriod: Get<BlockNumberFor<Self>>;
@@ -123,6 +127,7 @@ pub mod pallet {
         WorkRejected { project_id: T::ProjectId, freelancer: T::AccountId, reason_uri: BoundedVec<u8, ConstU32<256>> },
         ApplicationSubmitted { project_id: T::ProjectId, applicant: T::AccountId },
         WorkStarted { project_id: T::ProjectId, freelancer: T::AccountId },
+        ProjectCancelled { project_id: T::ProjectId, client: T::AccountId },
     }
 
     // --- Errors ---
@@ -179,6 +184,8 @@ pub mod pallet {
 
             Projects::<T>::insert(project_id, new_project);
             NextProjectId::<T>::put(project_id + T::ProjectId::one()); // Increment using One trait
+
+            T::Reputation::on_project_created(&client, budget)?;
 
             Self::deposit_event(Event::ProjectCreated { project_id, client, budget });
             Ok(())
@@ -301,8 +308,11 @@ pub mod pallet {
         pub fn accept_work(
             origin: OriginFor<T>,
             project_id: T::ProjectId,
+            rating: u32,
         ) -> DispatchResult {
             let client = ensure_signed(origin)?;
+            ensure!(rating > 0 && rating <= 5, "Rating must be between 1 and 5");
+            let scaled_rating = rating.saturating_mul(1000);
             
             Projects::<T>::try_mutate(project_id, |maybe_project| -> DispatchResult {
                 let project = maybe_project.as_mut().ok_or(Error::<T>::ProjectNotFound)?;
@@ -329,6 +339,10 @@ pub mod pallet {
                     payment,
                     ExistenceRequirement::KeepAlive,
                 ).map_err(|_| Error::<T>::PaymentFailed)?;
+
+                // Update freelancer and client reputation
+                T::Reputation::on_project_completed(freelancer, payment, scaled_rating, project_id)?;
+                T::Reputation::on_work_accepted(&client, project_id)?;
                 
                 project.status = ProjectStatus::Completed;
                 
@@ -389,7 +403,38 @@ pub mod pallet {
 
             Ok(())
         }
-    }
+
+        #[pallet::call_index(6)]
+        #[pallet::weight(Weight::default())]
+        pub fn cancel_project(
+            origin: OriginFor<T>,
+            project_id: T::ProjectId,
+        ) -> DispatchResult {
+            let client = ensure_signed(origin)?;
+
+            Projects::<T>::try_mutate(project_id, |maybe_project| -> DispatchResult {
+                let project = maybe_project.as_mut().ok_or(Error::<T>::ProjectNotFound)?;
+
+                ensure!(project.client == client, Error::<T>::NotProjectOwner);
+                ensure!(project.status == ProjectStatus::Created || project.status == ProjectStatus::InProgress, Error::<T>::InvalidStatus);
+
+                // Unlock the client's funds
+                let lock_id = Self::generate_lock_id(project_id);
+                T::Currency::remove_lock(
+                    lock_id,
+                    &project.client,
+                );
+
+                project.status = ProjectStatus::Cancelled;
+
+                T::Reputation::on_project_cancelled(&client)?;
+
+                Self::deposit_event(Event::ProjectCancelled { project_id, client });
+                Ok(())
+            })?;
+
+            Ok(())
+        }    }
 
     impl<T:Config> Pallet<T> {
         pub fn account_id() -> T::AccountId {

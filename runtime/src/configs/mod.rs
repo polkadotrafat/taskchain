@@ -61,6 +61,7 @@ use super::{
     RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask, Session, SessionKeys,
     System, WeightToFee, XcmpQueue, AVERAGE_ON_INITIALIZE_RATIO, EXISTENTIAL_DEPOSIT, HOURS,
     MAXIMUM_BLOCK_WEIGHT, MICROUNIT, NORMAL_DISPATCH_RATIO, SLOT_DURATION, VERSION,
+    Reputation,
 };
 use xcm_config::{RelayLocation, XcmOriginToTransactDispatchOrigin};
 
@@ -329,6 +330,7 @@ impl pallet_projects::Config for Runtime {
     type MaxApplicants = MaxApplicantsLength;
     type ReviewPeriod = ReviewPeriod;
     type WeightInfo = (); // Configure based on benchmarking results.
+    type Reputation = Reputation;
 }
 
 impl pallet_reputation::Config for Runtime {
@@ -338,5 +340,8 @@ impl pallet_reputation::Config for Runtime {
     type GovernanceOrigin = EnsureRoot<AccountId>;
     type MaxMetadata = ConstU32<256>;
     type WeightInfo = ();
-    type MaxJurors = MaxJurors;
+    type MaxJurors = MaxApplicantsLength;
+    type MaxGoldJurors = ConstU32<100>;
+    type MaxSilverJurors = ConstU32<200>;
+    type MaxBronzeJurors = ConstU32<200>;
 }

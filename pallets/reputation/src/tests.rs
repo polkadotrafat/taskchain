@@ -48,67 +48,100 @@ fn register_user_fails_if_already_registered() {
 }
 
 #[test]
-fn update_juror_tier_works_for_eligible_user() {
+fn register_as_juror_places_user_in_correct_tier_list() {
     new_test_ext().execute_with(|| {
-        System::set_block_number(100);
+        System::set_block_number(1);
         let alice = account("alice");
-
-        // Arrange: Register user and manually set their stats to meet Bronze tier criteria
         assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+
+        // Arrange: Give Alice stats that qualify for Silver tier
         ReputationStats::<Test>::mutate(&alice, |stats| {
-            stats.projects_completed = 5;
-            stats.total_earned = 1001; // Just over the 1000 threshold
+            stats.projects_completed = 25;
+            stats.total_earned = 15000;
             stats.disputes_lost = 0;
         });
 
-        // Act: User updates their tier
-        assert_ok!(Reputation::update_juror_tier(RawOrigin::Signed(alice.clone()).into()));
+        // Act: Alice registers as a juror
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
 
-        // Assert: Event was emitted with the correct new tier
-        System::assert_last_event(Event::JurorTierUpdated {
-            account: alice.clone()
-        }.into());
+        // Assert: Alice is in the SilverJurors pool and her tier is cached correctly
+        let silver_jurors = Reputation::silver_jurors();
+        assert!(silver_jurors.contains(&alice));
+        assert!(!Reputation::gold_jurors().contains(&alice)); // Should not be in other pools
+        assert_eq!(Reputation::juror_tier(&alice), JurorTier::Silver);
 
-        // Assert: The tier is correctly stored on-chain
-        assert_eq!(Reputation::juror_tier(&alice), JurorTier::Bronze);
+        // Assert: Event was emitted
+        System::assert_last_event(Event::JurorRegistered { account: alice }.into());
     });
 }
 
 #[test]
-fn update_juror_tier_sets_ineligible_if_disputes_lost() {
+fn juror_tier_updates_automatically_on_promotion() {
     new_test_ext().execute_with(|| {
-        System::set_block_number(100);
-        let alice = account("alice");
+        System::set_block_number(1);
+        let bob = account("bob");
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(bob.clone()).into()));
 
-        // Arrange: Register user and set stats to meet Gold tier, but with one lost dispute
+        // Arrange: Give Bob stats JUST BELOW Gold tier and register him as a juror
+        ReputationStats::<Test>::mutate(&bob, |stats| {
+            stats.projects_completed = 49;
+            stats.total_earned = 49000;
+            stats.disputes_lost = 0;
+        });
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(bob.clone()).into()));
+        
+        // Assert pre-condition: He is a Silver juror
+        assert!(Reputation::silver_jurors().contains(&bob));
+        assert!(!Reputation::gold_jurors().contains(&bob));
+
+        // Act: A project completion pushes him over the Gold threshold
+        System::set_block_number(2);
+        assert_ok!(Reputation::on_project_completed(&bob, 1001, 5000, 1));
+
+        // Assert: He was automatically moved from Silver to Gold
+        assert!(!Reputation::silver_jurors().contains(&bob));
+        assert!(Reputation::gold_jurors().contains(&bob));
+        assert_eq!(Reputation::juror_tier(&bob), JurorTier::Gold);
+
+        // Check for the tier update event
+        System::assert_has_event(Event::JurorTierUpdated {
+            account: bob.clone()
+        }.into());
+    });
+}
+
+#[test]
+fn juror_tier_demotes_and_deregisters_on_dispute_loss() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+        let alice = account("alice");
+        let bob = account("bob");
         assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(bob.clone()).into()));
+
+        // Arrange: Give Alice Gold tier stats and register her as a juror
         ReputationStats::<Test>::mutate(&alice, |stats| {
             stats.projects_completed = 50;
-            stats.total_earned = 50001;
-            stats.disputes_lost = 1; // The disqualifying factor
+            stats.total_earned = 50000;
+            stats.disputes_lost = 0;
         });
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+        assert!(Reputation::gold_jurors().contains(&alice)); // Pre-condition check
 
-        // Act: User updates their tier
-        assert_ok!(Reputation::update_juror_tier(RawOrigin::Signed(alice.clone()).into()));
+        // Act: Alice loses a dispute to Bob
+        System::set_block_number(2);
+        assert_ok!(Reputation::on_dispute_outcome(&bob, &alice, 1, 1000));
+        
+        // Assert: Alice is now Ineligible and has been completely removed from all juror pools
+        // and the registry because she lost a dispute.
+        assert_eq!(Reputation::juror_tier(&alice), JurorTier::Ineligible);
+        assert!(!Reputation::gold_jurors().contains(&alice));
+        assert!(!Reputation::juror_opted_in(&alice));
 
-        // Assert: Tier is updated to Ineligible
-        System::assert_last_event(Event::JurorTierUpdated {
+        // Check for the automatic deregistration event
+        System::assert_has_event(Event::JurorAutomaticallyDeregistered {
             account: alice.clone()
         }.into());
-        assert_eq!(Reputation::juror_tier(&alice), JurorTier::Ineligible);
-    });
-}
-
-#[test]
-fn update_juror_tier_fails_for_unregistered_user() {
-    new_test_ext().execute_with(|| {
-        let bob = account("bob"); // Bob is not registered
-
-        // Act & Assert: Should fail because the user has no reputation data
-        assert_noop!(
-            Reputation::update_juror_tier(RawOrigin::Signed(bob.clone()).into()),
-            Error::<Test>::UserNotRegistered
-        );
     });
 }
 
@@ -207,10 +240,9 @@ fn on_jury_vote_updates_stats_correctly() {
             ReputationStats::<Test>::mutate(&charlie, |s| { s.projects_completed = 1; });
             ReputationStats::<Test>::mutate(&dave, |s| { s.projects_completed = 6; s.total_earned = 1500; });
 
-            assert_ok!(Reputation::update_juror_tier(RawOrigin::Signed(alice.clone()).into()));
-            assert_ok!(Reputation::update_juror_tier(RawOrigin::Signed(bob.clone()).into()));
-            assert_ok!(Reputation::update_juror_tier(RawOrigin::Signed(charlie.clone()).into()));
-            assert_ok!(Reputation::update_juror_tier(RawOrigin::Signed(dave.clone()).into()));
+            assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+            assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(bob.clone()).into()));
+            assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(dave.clone()).into()));
 
             // Act: Get jurors of at least Bronze tier, excluding Bob
             let exclude_list = vec![bob.clone()];

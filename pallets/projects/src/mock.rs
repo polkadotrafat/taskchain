@@ -10,6 +10,9 @@ use sp_runtime::{
     BuildStorage, AccountId32
 };
 use crate as pallet_projects;
+use pallet_reputation::{ReputationInterface, JurorTier};
+use frame_support::dispatch::DispatchResult;
+use frame_support::BoundedVec;
 
 // Configure a mock runtime to test the pallet.
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -21,6 +24,7 @@ frame_support::construct_runtime!(
         System: frame_system,
         Balances: pallet_balances,
         Projects: pallet_projects,
+        Reputation: pallet_reputation,
     }
 );
 
@@ -86,6 +90,51 @@ impl pallet_balances::Config for Test {
     type DoneSlashHandler = ();
 }
 
+pub struct MockReputation;
+
+impl ReputationInterface<AccountId32, u64, u32, u64, MaxApplicantsLength> for MockReputation {
+    fn on_project_completed(_freelancer: &AccountId32, _project_value: u64, _client_rating: u32, _project_id: u32) -> DispatchResult {
+        Ok(())
+    }
+
+    fn on_dispute_outcome(_winner: &AccountId32, _loser: &AccountId32, _project_id: u32, _project_value: u64) -> DispatchResult {
+        Ok(())
+    }
+
+    fn on_project_created(_client: &AccountId32, _budget: u64) -> DispatchResult {
+        Ok(())
+    }
+
+    fn on_project_cancelled(_client: &AccountId32) -> DispatchResult {
+        Ok(())
+    }
+
+    fn on_work_accepted(_client: &AccountId32, _project_id: u32) -> DispatchResult {
+        Ok(())
+    }
+
+    fn get_eligible_jurors(_min_tier: JurorTier, _exclude: &[AccountId32], _count: u32) -> BoundedVec<AccountId32, MaxApplicantsLength> {
+        BoundedVec::new()
+    }
+
+    fn on_jury_vote(_juror: &AccountId32, _voted_with_majority: bool) -> DispatchResult {
+        Ok(())
+    }
+}
+
+impl pallet_reputation::Config for Test {
+    type RuntimeEvent = RuntimeEvent;
+    type WeightInfo = ();
+    type GovernanceOrigin = frame_system::EnsureRoot<AccountId32>;
+    type Currency = Balances;
+    type ProjectId = u32;
+    type MaxMetadata = ConstU32<1024>;
+    type MaxJurors = ConstU32<100>;
+    type MaxGoldJurors = ConstU32<100>;
+    type MaxSilverJurors = ConstU32<200>;
+    type MaxBronzeJurors = ConstU32<200>;
+}
+
 impl pallet_projects::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
@@ -94,6 +143,7 @@ impl pallet_projects::Config for Test {
     type MaxApplicants = MaxApplicantsLength;
     type ReviewPeriod = ReviewPeriod;
     type WeightInfo = ();
+    type Reputation = MockReputation;
 }
 
 // Build genesis storage according to the mock runtime.

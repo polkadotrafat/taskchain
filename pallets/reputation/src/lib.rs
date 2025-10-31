@@ -30,6 +30,20 @@ pub trait ReputationInterface<AccountId, Balance, ProjectId, BlockNumber, MaxJur
         project_id: ProjectId,
         project_value: Balance,
     ) -> DispatchResult;
+
+    fn on_project_created(
+        client: &AccountId,
+        budget: Balance,
+    ) -> DispatchResult;
+
+    fn on_project_cancelled(
+        client: &AccountId,
+    ) -> DispatchResult;
+
+    fn on_work_accepted(
+        client: &AccountId,
+        project_id: ProjectId,
+    ) -> DispatchResult;
         
     fn get_eligible_jurors(
         min_tier: JurorTier, 
@@ -78,8 +92,6 @@ pub mod pallet {
         // --- Client-Specific Metrics ---
         pub projects_posted: u32,
         pub total_spent: Balance,
-        pub hire_rate: Permill,
-        pub acceptance_rate: Permill,
         
         // --- Dispute Metrics (Universal) ---
         pub disputes_initiated: u32,
@@ -173,6 +185,15 @@ pub mod pallet {
 
         #[pallet::constant]
         type MaxJurors: Get<u32>;
+
+        #[pallet::constant]
+        type MaxGoldJurors: Get<u32>;
+
+        #[pallet::constant]
+        type MaxSilverJurors: Get<u32>;
+
+        #[pallet::constant]
+        type MaxBronzeJurors: Get<u32>;
         
     }
 
@@ -212,6 +233,31 @@ pub mod pallet {
     /// The cached and on-chain verified tier of a user for juror selection.
     pub type JurorTiers<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, JurorTier, ValueQuery>;
 
+    #[pallet::storage]
+    #[pallet::getter(fn juror_opted_in)]
+    /// Tracks accounts that have explicitly registered to be a juror.
+    /// A simple boolean is enough if we don't add staking.
+    pub type JurorRegistry<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn gold_jurors)]
+    /// The active, opted-in pool of Gold tier jurors.
+    pub type GoldJurors<T: Config> = StorageValue<_, BoundedVec<T::AccountId, T::MaxGoldJurors>, ValueQuery>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn silver_jurors)]
+    /// The active, opted-in pool of Silver tier jurors.
+    pub type SilverJurors<T: Config> = StorageValue<_, BoundedVec<T::AccountId, T::MaxSilverJurors>, ValueQuery>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn bronze_jurors)]
+    /// The active, opted-in pool of Bronze tier jurors.
+    pub type BronzeJurors<T: Config> = StorageValue<_, BoundedVec<T::AccountId, T::MaxBronzeJurors>, ValueQuery>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn next_juror_index)]
+    pub type NextJurorIndex<T: Config> = StorageMap<_, Blake2_128Concat, JurorTier, u32, ValueQuery>;
+
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
@@ -229,7 +275,10 @@ pub mod pallet {
         },
         WeightsUpdated,
         GlobalStatsUpdated,
-        JurorTierUpdated { account: T::AccountId},
+        JurorTierUpdated { account: T::AccountId },
+        JurorRegistered { account: T::AccountId },
+        JurorDeregistered { account: T::AccountId },
+        JurorAutomaticallyDeregistered { account: T::AccountId },
     }
 
     #[pallet::error]
@@ -240,6 +289,10 @@ pub mod pallet {
         InvalidScore,
         ArithmeticOverflow,
         TooManySkills,
+        AlreadyRegisteredAsJuror,
+        NotRegisteredAsJuror,
+        InsufficientTier,
+        JurorPoolFull,
     }
 
     #[pallet::call]
@@ -264,8 +317,6 @@ pub mod pallet {
                 total_earned: BalanceOf::<T>::zero(),
                 projects_posted: 0,
                 total_spent: BalanceOf::<T>::zero(),
-                hire_rate: Permill::from_parts(0),
-                acceptance_rate: Permill::from_parts(0),
                 disputes_initiated: 0,
                 disputes_won: 0,
                 disputes_lost: 0,
@@ -308,26 +359,44 @@ pub mod pallet {
 
         #[pallet::call_index(2)]
         #[pallet::weight(Weight::default())]
-        pub fn update_juror_tier(origin: OriginFor<T>) -> DispatchResult {
+        pub fn register_as_juror(origin: OriginFor<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            // 1. Fetch the user's raw, on-chain reputation data.
-            let stats = Self::reputation_stats(&who); // This now returns ReputationData directly
+            // 1. Check if they are already registered
+            ensure!(!Self::juror_opted_in(&who), Error::<T>::AlreadyRegisteredAsJuror);
 
-            // --- NEW CHECK FOR REGISTRATION ---
-            ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
+            // 2. Check if they meet the minimum tier requirement (e.g., Bronze)
+            let tier = Self::calculate_tier_from_stats(&Self::reputation_stats(&who));
+            ensure!(tier >= JurorTier::Bronze, Error::<T>::InsufficientTier);
 
-            // 2. Run a *simplified, on-chain* calculation to determine the tier.
-            //    This calculation MUST be cheap. It uses integer math and the raw stats.
-            let on_chain_calculated_tier = Self::calculate_tier_from_stats::<BalanceOf<T>, BlockNumberFor<T>>(&stats);
+            // 3. (Optional but recommended) Take a stake/bond
+            // T::Currency::reserve(&who, T::JurorStake::get())?;
 
-            // 3. Update the storage with the newly verified tier.
-            JurorTiers::<T>::insert(&who, on_chain_calculated_tier);
+            // 4. Add them to the registry and the correct tier list
+            JurorRegistry::<T>::insert(&who, true);
+            JurorTiers::<T>::insert(&who, tier);
+            Self::add_juror_to_tier_list(&who, tier)?;
 
-            Self::deposit_event(Event::JurorTierUpdated {
-                account: who
-            });
+            Self::deposit_event(Event::JurorRegistered { account: who });
+            Ok(())
+        }
 
+        #[pallet::call_index(3)]
+        #[pallet::weight(Weight::default())]
+        pub fn deregister_as_juror(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Self::juror_opted_in(&who), Error::<T>::NotRegisteredAsJuror);
+
+            // 1. (Optional) Return their stake/bond
+            // T::Currency::unreserve(&who, T::JurorStake::get());
+
+            // 2. Remove them from the registry and their tier list
+            let tier = Self::juror_tier(&who); // Get their last known tier
+            Self::remove_juror_from_tier_list(&who, tier)?;
+            JurorRegistry::<T>::remove(&who);
+            JurorTiers::<T>::remove(&who);
+
+            Self::deposit_event(Event::JurorDeregistered { account: who });
             Ok(())
         }
     }
@@ -339,6 +408,8 @@ pub mod pallet {
             client_rating: u32,
             project_id: T::ProjectId,
         ) -> DispatchResult {
+            ensure!(client_rating <= 5000, Error::<T>::InvalidScore);
+
             ReputationStats::<T>::try_mutate(freelancer, |stats| -> DispatchResult {
                 ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
                 stats.projects_completed = stats.projects_completed.saturating_add(1);
@@ -354,6 +425,17 @@ pub mod pallet {
                 
                 Ok(())
             })?;
+
+            Self::update_juror_tier(freelancer)?;
+            
+            Self::create_attestation(
+                freelancer,
+                project_id,
+                AttestorType::ClientApproval,
+                AttestationOutcome::Positive,
+                project_value,
+                client_rating,
+            )?;
             
             Self::deposit_event(Event::ProjectCompleted { 
                 freelancer: freelancer.clone(), 
@@ -384,6 +466,9 @@ pub mod pallet {
                 stats.last_activity_block = <frame_system::Pallet<T>>::block_number();
                 Ok(())
             })?;
+
+            Self::update_juror_tier(winner)?;
+            Self::update_juror_tier(loser)?;
             
             Self::deposit_event(Event::DisputeResolved { 
                 winner: winner.clone(), 
@@ -419,40 +504,67 @@ pub mod pallet {
                 
                 Ok(())
             })?;
+
+            Self::update_juror_tier(juror)?;
             
             Ok(())
         }
 
         pub(crate) fn internal_get_eligible_jurors(
-            min_tier: JurorTier, // e.g., We need at least Silver jurors
+            min_tier: JurorTier,
             exclude: &[T::AccountId],
-            _count: u32,
+            count: u32,
         ) -> BoundedVec<T::AccountId, T::MaxJurors> {
-            let mut eligible_jurors = BoundedVec::<T::AccountId, T::MaxJurors>::new();
-            for (account, tier) in JurorTiers::<T>::iter() {
-                if tier >= min_tier && !exclude.contains(&account) {
-                    if eligible_jurors.try_push(account).is_err() {
-                        // We have reached the maximum number of jurors.
-                        break;
+            let mut selected_jurors = BoundedVec::<T::AccountId, T::MaxJurors>::new();
+            let required_count = count as usize;
+
+            // The closure now accepts `selected_jurors` as a mutable argument
+            let mut select_from_pool = |
+                selected_jurors: &mut BoundedVec<T::AccountId, T::MaxJurors>,
+                tier: JurorTier,
+                pool: &[T::AccountId]
+            | {
+                if selected_jurors.len() >= required_count || pool.is_empty() { return; }
+
+                let mut current_index = Self::next_juror_index(tier) as usize;
+                let mut attempts = 0;
+
+                while selected_jurors.len() < required_count && attempts < pool.len() {
+                    let juror_to_check = &pool[current_index % pool.len()];
+
+                    if !exclude.contains(juror_to_check) && !selected_jurors.contains(juror_to_check) {
+                        // This unwrap is safe because we check the length above.
+                        selected_jurors.try_push(juror_to_check.clone()).unwrap();
                     }
+                    current_index += 1;
+                    attempts += 1;
                 }
+                NextJurorIndex::<T>::insert(tier, (current_index % pool.len()) as u32);
+            };
+
+            if min_tier <= JurorTier::Gold {
+                select_from_pool(&mut selected_jurors, JurorTier::Gold, &Self::gold_jurors());
             }
-            eligible_jurors
+            if selected_jurors.len() < required_count && min_tier <= JurorTier::Silver {
+                select_from_pool(&mut selected_jurors, JurorTier::Silver, &Self::silver_jurors());
+            }
+            if selected_jurors.len() < required_count && min_tier <= JurorTier::Bronze {
+                select_from_pool(&mut selected_jurors, JurorTier::Bronze, &Self::bronze_jurors());
+            }
+
+            selected_jurors
         }
 
-        pub fn calculate_tier_from_stats<Balance, BlockNumber>(
+        pub fn calculate_tier_from_stats(
             stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
-        ) -> JurorTier
-        {
-            // Define the tier thresholds. These can be governed constants.
+        ) -> JurorTier {
             const GOLD_PROJECTS: u32 = 50;
-            const GOLD_EARNED: u128 = 50000; // Assuming 50k in the smallest unit
+            const GOLD_EARNED: u128 = 50000;
             const SILVER_PROJECTS: u32 = 20;
             const SILVER_EARNED: u128 = 10000;
             const BRONZE_PROJECTS: u32 = 5;
             const BRONZE_EARNED: u128 = 1000;
 
-            // A user must not have lost disputes to qualify for higher tiers.
             if stats.disputes_lost > 0 {
                 return JurorTier::Ineligible;
             }
@@ -469,7 +581,323 @@ pub mod pallet {
                 JurorTier::Ineligible
             }
         }
-    
+
+        pub(crate) fn internal_on_project_created(
+            client: &T::AccountId,
+            budget: BalanceOf<T>,
+        ) -> DispatchResult {
+            ReputationStats::<T>::try_mutate(client, |stats| -> DispatchResult {
+                ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
+                stats.projects_posted = stats.projects_posted.saturating_add(1);
+                stats.total_spent = stats.total_spent.saturating_add(budget);
+                stats.last_activity_block = <frame_system::Pallet<T>>::block_number();
+                Ok(())
+            })?;
+            Ok(())
+        }
+
+        pub(crate) fn internal_on_project_cancelled(
+            client: &T::AccountId,
+        ) -> DispatchResult {
+            ReputationStats::<T>::try_mutate(client, |stats| -> DispatchResult {
+                ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
+                stats.projects_failed = stats.projects_failed.saturating_add(1);
+                stats.last_activity_block = <frame_system::Pallet<T>>::block_number();
+                Ok(())
+            })?;
+            Ok(())
+        }
+
+        pub(crate) fn internal_on_work_accepted(
+            client: &T::AccountId,
+            _project_id: T::ProjectId,
+        ) -> DispatchResult {
+            ReputationStats::<T>::try_mutate(client, |stats| -> DispatchResult {
+                ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
+                // Increment projects where client accepted work
+                stats.projects_completed = stats.projects_completed.saturating_add(1);
+                stats.last_activity_block = <frame_system::Pallet<T>>::block_number();
+                Ok(())
+            })?;
+            Ok(())
+        }
+
+        fn create_attestation(
+            account: &T::AccountId,
+            project_id: T::ProjectId,
+            attestor: AttestorType,
+            outcome: AttestationOutcome,
+            value: BalanceOf<T>,
+            rating: u32,
+        ) -> DispatchResult {
+            let metadata = BoundedVec::try_from(rating.encode())
+                .map_err(|_| Error::<T>::TooManySkills)?;
+            
+            let attestation = Attestation {
+                attestor,
+                project_id,
+                outcome,
+                value,
+                timestamp: <frame_system::Pallet<T>>::block_number(),
+                metadata,
+            };
+            
+            Attestations::<T>::insert(account, project_id, attestation);
+            Ok(())
+        }
+
+        pub fn calculate_reputation_score(account: &T::AccountId) -> Result<u32, Error<T>> {
+            let stats = Self::reputation_stats(account);
+            ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
+            
+            let weights = Self::reputation_weights();
+            let current_block = <frame_system::Pallet<T>>::block_number();
+            
+            // Component 1: Completion Rate Score (0-2500 points)
+            let completion_score = Self::calculate_completion_score(&stats, weights.completion_weight);
+            
+            // Component 2: Rating Score (0-2500 points)
+            let rating_score = Self::calculate_rating_score(&stats);
+            
+            // Component 3: Volume Score (0-2000 points)
+            let volume_score = Self::calculate_volume_score(&stats);
+            
+            // Component 4: Activity Score (0-1500 points)
+            let activity_score = Self::calculate_activity_score(&stats, current_block, weights.time_decay_rate);
+            
+            // Component 5: Dispute Score (0-1500 points, can be negative)
+            let dispute_score = Self::calculate_dispute_score(&stats, weights.dispute_penalty);
+            
+            // Sum all components
+            let total_score = completion_score
+                .saturating_add(rating_score)
+                .saturating_add(volume_score)
+                .saturating_add(activity_score)
+                .saturating_add(dispute_score);
+            
+            // Cap at 10000
+            Ok(total_score.min(10000))
+        }
+
+        fn calculate_completion_score(
+            stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
+            weight: u32,
+        ) -> u32 {
+            let total_projects = stats.projects_completed.saturating_add(stats.projects_failed);
+            
+            if total_projects == 0 {
+                return 0;
+            }
+            
+            // Completion rate as percentage (0-100)
+            let completion_rate = (stats.projects_completed.saturating_mul(100)) / total_projects;
+            
+            // Scale to 0-2500 based on weight
+            (completion_rate.saturating_mul(25).saturating_mul(weight)) / 100
+        }
+
+        fn calculate_rating_score(
+            stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
+        ) -> u32 {
+            if stats.total_ratings_received == 0 {
+                return 0;
+            }
+            
+            // avg_rating_received is 0-5000 scale
+            // Scale to 0-2500: (rating / 5000) * 2500 = rating / 2
+            stats.avg_rating_received / 2
+        }
+
+        fn calculate_volume_score(
+            stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
+        ) -> u32 {
+            // Projects completed component (0-1000 points)
+            // Logarithmic scaling: more projects = higher score, but diminishing returns
+            let project_score = match stats.projects_completed {
+                0 => 0,
+                1..=5 => stats.projects_completed.saturating_mul(100),
+                6..=20 => 500 + ((stats.projects_completed - 5).saturating_mul(20)),
+                21..=50 => 800 + ((stats.projects_completed - 20).saturating_mul(5)),
+                _ => 1000,
+            };
+            
+            // Value component (0-1000 points)
+            // This would need to be scaled based on your token economics
+            let earned_u128: u128 = stats.total_earned.try_into().unwrap_or(0);
+            let value_score = match earned_u128 {
+                0 => 0,
+                1..=10000 => (earned_u128 / 10) as u32,
+                10001..=100000 => 1000 + ((earned_u128 - 10000) / 100) as u32,
+                _ => 1000,
+            };
+            
+            project_score.saturating_add(value_score).min(2000)
+        }
+
+        fn calculate_activity_score(
+            stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
+            current_block: BlockNumberFor<T>,
+            decay_rate: Permill,
+        ) -> u32 {
+            // Account age bonus (0-750 points)
+            let account_age = current_block.saturating_sub(stats.registration_block);
+            let age_score = match account_age.try_into().unwrap_or(0u32) {
+                0..=10000 => 0,
+                10001..=50000 => 250,
+                50001..=100000 => 500,
+                _ => 750,
+            };
+            
+            // Recent activity bonus (0-750 points)
+            let blocks_since_activity = current_block.saturating_sub(stats.last_activity_block);
+            let recency: u32 = blocks_since_activity.try_into().unwrap_or(u32::MAX);
+            
+            let recency_score = if recency < 10000 {
+                750
+            } else if recency < 50000 {
+                500
+            } else if recency < 100000 {
+                250
+            } else {
+                0
+            };
+            
+            // Apply time decay
+            let base_score = age_score.saturating_add(recency_score);
+            let decay_factor = decay_rate.deconstruct();
+            let decayed = (base_score.saturating_mul(1_000_000 - decay_factor)) / 1_000_000;
+            
+            decayed.min(1500)
+        }
+
+        fn calculate_dispute_score(
+            stats: &ReputationData<BalanceOf<T>, BlockNumberFor<T>>,
+            penalty_weight: u32,
+        ) -> u32 {
+            let total_disputes = stats.disputes_won.saturating_add(stats.disputes_lost);
+            
+            if total_disputes == 0 {
+                return 1500; // Max points if no disputes
+            }
+            
+            // Win rate percentage
+            let win_rate = (stats.disputes_won.saturating_mul(100)) / total_disputes;
+            
+            // Base score: 0-1500 based on win rate
+            let base_score = (win_rate.saturating_mul(15)).min(1500);
+            
+            // Apply penalty for each lost dispute
+            let penalty = stats.disputes_lost.saturating_mul(penalty_weight);
+            
+            base_score.saturating_sub(penalty)
+        }
+
+        pub fn calculate_client_reputation(account: &T::AccountId) -> Result<u32, Error<T>> {
+            let stats = Self::reputation_stats(account);
+            ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
+            
+            // Component 1: Project posting reliability (0-3000)
+            let posting_score = if stats.projects_posted > 0 {
+                let completion_rate = (stats.projects_completed.saturating_mul(100)) 
+                    / stats.projects_posted;
+                completion_rate.saturating_mul(30)
+            } else {
+                0
+            };
+            
+            // Component 2: Payment history (0-3000)
+            let spent_u128: u128 = stats.total_spent.try_into().unwrap_or(0);
+            let payment_score = match spent_u128 {
+                0 => 0,
+                1..=50000 => (spent_u128 / 20) as u32,
+                _ => 3000,
+            };
+            
+            // Component 3: Cancellation penalty (0-2000, negative impact)
+            let cancel_rate = if stats.projects_posted > 0 {
+                (stats.projects_failed.saturating_mul(100)) / stats.projects_posted
+            } else {
+                0
+            };
+            let cancellation_score = 2000u32.saturating_sub(cancel_rate.saturating_mul(20));
+            
+            // Component 4: Dispute handling (0-2000)
+            let dispute_score = if stats.disputes_initiated > 0 {
+                let win_rate = (stats.disputes_won.saturating_mul(100)) 
+                    / stats.disputes_initiated;
+                win_rate.saturating_mul(20)
+            } else {
+                2000 // No disputes is good for clients
+            };
+            
+            let total = posting_score
+                .saturating_add(payment_score)
+                .saturating_add(cancellation_score)
+                .saturating_add(dispute_score);
+            
+            Ok(total.min(10000))
+        }
+
+        fn add_juror_to_tier_list(account: &T::AccountId, tier: JurorTier) -> DispatchResult {
+            match tier {
+                JurorTier::Gold => GoldJurors::<T>::try_mutate(|jurors| jurors.try_push(account.clone()))
+                    .map_err(|_| Error::<T>::JurorPoolFull)?,
+                JurorTier::Silver => SilverJurors::<T>::try_mutate(|jurors| jurors.try_push(account.clone()))
+                    .map_err(|_| Error::<T>::JurorPoolFull)?,
+                JurorTier::Bronze => BronzeJurors::<T>::try_mutate(|jurors| jurors.try_push(account.clone()))
+                    .map_err(|_| Error::<T>::JurorPoolFull)?,
+                JurorTier::Ineligible => {}, // Do nothing
+            }
+            Ok(())
+        }
+
+        fn remove_juror_from_tier_list(account: &T::AccountId, tier: JurorTier) -> DispatchResult {
+            match tier {
+                JurorTier::Gold => GoldJurors::<T>::mutate(|jurors| {
+                    if let Some(index) = jurors.iter().position(|j| j == account) {
+                        jurors.swap_remove(index);
+                    }
+                }),
+                JurorTier::Silver => SilverJurors::<T>::mutate(|jurors| {
+                    if let Some(index) = jurors.iter().position(|j| j == account) {
+                        jurors.swap_remove(index);
+                    }
+                }),
+                JurorTier::Bronze => BronzeJurors::<T>::mutate(|jurors| {
+                    if let Some(index) = jurors.iter().position(|j| j == account) {
+                        jurors.swap_remove(index);
+                    }
+                }),
+                JurorTier::Ineligible => {},
+            }
+            Ok(())
+        }
+
+        fn update_juror_tier(account: &T::AccountId) -> DispatchResult {
+            if !Self::juror_opted_in(account) { return Ok(()); }
+
+            let old_tier = Self::juror_tier(account);
+            let new_tier = Self::calculate_tier_from_stats(&Self::reputation_stats(account));
+
+            if old_tier != new_tier {
+                // Always remove from the old tier list first
+                Self::remove_juror_from_tier_list(account, old_tier)?;
+
+                if new_tier == JurorTier::Ineligible {
+                    // User is no longer eligible - fully deregister them
+                    JurorRegistry::<T>::remove(account);
+                    JurorTiers::<T>::remove(account);
+                    Self::deposit_event(Event::JurorAutomaticallyDeregistered { account: account.clone() });
+                } else {
+                    // User is still eligible but tier changed - update to new tier
+                    Self::add_juror_to_tier_list(account, new_tier)?;
+                    JurorTiers::<T>::insert(account, new_tier);
+                    Self::deposit_event(Event::JurorTierUpdated { account: account.clone()});
+                }
+            }
+            Ok(())
+        }
+
     }
     
 }
@@ -497,6 +925,26 @@ impl<T: pallet::Config> ReputationInterface<
         project_value: pallet::BalanceOf<T>,
     ) -> DispatchResult {
         Self::internal_dispute_outcome(winner, loser, project_id, project_value)
+    }
+
+    fn on_project_created(
+        client: &T::AccountId,
+        budget: pallet::BalanceOf<T>,
+    ) -> DispatchResult {
+        Self::internal_on_project_created(client, budget)
+    }
+
+    fn on_project_cancelled(
+        client: &T::AccountId,
+    ) -> DispatchResult {
+        Self::internal_on_project_cancelled(client)
+    }
+
+    fn on_work_accepted(
+        client: &T::AccountId,
+        project_id: T::ProjectId,
+    ) -> DispatchResult {
+        Self::internal_on_work_accepted(client, project_id)
     }
     
     fn on_jury_vote(
