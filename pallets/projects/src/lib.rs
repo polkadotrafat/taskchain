@@ -73,6 +73,13 @@ pub mod pallet {
         pub dispute_info: Option<DisputeInfo<T>>,          // Information about rejections and disputes
     }
 
+    #[derive(Clone, Encode, Decode, PartialEq, Debug,MaxEncodedLen, TypeInfo, Eq, Copy)]
+	#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+    pub enum Ruling {
+        ClientWins,
+        FreelancerWins,
+    }
+
     #[pallet::config]
     pub trait Config: frame_system::Config {
         /// The overarching runtime event type.
