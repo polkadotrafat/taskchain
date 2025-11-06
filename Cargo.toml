@@ -128,3 +128,4 @@ parachain-info = { version = "0.20.0", package = "staging-parachain-info", defau
 # custom
 pallet-projects = { path = "pallets/projects", default-features = false }
 pallet-reputation = { path = "pallets/reputation", default-features = false }
+pallet-arbitration = { path = "pallets/arbitration", default-features = false }

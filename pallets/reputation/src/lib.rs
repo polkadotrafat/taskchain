@@ -519,7 +519,7 @@ pub mod pallet {
             let required_count = count as usize;
 
             // The closure now accepts `selected_jurors` as a mutable argument
-            let mut select_from_pool = |
+            let select_from_pool = |
                 selected_jurors: &mut BoundedVec<T::AccountId, T::MaxJurors>,
                 tier: JurorTier,
                 pool: &[T::AccountId]

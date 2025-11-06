@@ -6891,6 +6891,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "pallet-arbitration"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-balances",
+ "pallet-projects",
+ "pallet-reputation",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-asset-conversion"
 version = "22.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8184,6 +8201,7 @@ dependencies = [
  "frame-try-runtime",
  "hex-literal 1.0.0",
  "log",
+ "pallet-arbitration",
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",

@@ -81,6 +81,7 @@ parachain-info.workspace = true
 #custom
 pallet-projects.workspace = true
 pallet-reputation.workspace = true
+pallet-arbitration.workspace = true
 
 [features]
 default = ["std"]
@@ -111,6 +112,7 @@ std = [
   "pallet-message-queue/std",
   "pallet-projects/std",
   "pallet-reputation/std",
+  "pallet-arbitration/std",
   "pallet-session/std",
   "pallet-sudo/std",
   "pallet-timestamp/std",

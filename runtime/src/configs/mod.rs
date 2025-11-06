@@ -34,7 +34,7 @@ use frame_support::{
     dispatch::DispatchClass,
     parameter_types,
     traits::{
-        ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin, VariantCountOf,
+        ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin, VariantCountOf, ConstU128,
     },
     weights::{ConstantMultiplier, Weight},
     PalletId,
@@ -60,8 +60,8 @@ use super::{
     MessageQueue, Nonce, PalletInfo, ParachainSystem, Runtime, RuntimeCall, RuntimeEvent,
     RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask, Session, SessionKeys,
     System, WeightToFee, XcmpQueue, AVERAGE_ON_INITIALIZE_RATIO, EXISTENTIAL_DEPOSIT, HOURS,
-    MAXIMUM_BLOCK_WEIGHT, MICROUNIT, NORMAL_DISPATCH_RATIO, SLOT_DURATION, VERSION,
-    Reputation,
+    MAXIMUM_BLOCK_WEIGHT, MICROUNIT, NORMAL_DISPATCH_RATIO, SLOT_DURATION, VERSION, UNIT,
+    Reputation, Projects, Arbitration,
 };
 use xcm_config::{RelayLocation, XcmOriginToTransactDispatchOrigin};
 
@@ -344,4 +344,28 @@ impl pallet_reputation::Config for Runtime {
     type MaxGoldJurors = ConstU32<100>;
     type MaxSilverJurors = ConstU32<200>;
     type MaxBronzeJurors = ConstU32<200>;
+}
+
+parameter_types! {
+    pub const ArbitrationPalletId: PalletId = PalletId(*b"tsk/arbt");
+}
+
+impl pallet_arbitration::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type ProjectId = u32;
+    type WeightInfo = ();
+    type AiOracleOrigin = EnsureRoot<AccountId>; // For now, using root as oracle origin
+    type Arbitrable = Projects; // Projects pallet implements the Arbitrable trait
+    type Reputation = Reputation;
+    type MaxEvidenceMeta = ConstU32<256>;
+    type MaxJurors = MaxApplicantsLength;
+    type PalletId = ArbitrationPalletId;
+    type MinJurors = ConstU32<3>;
+    type AiProcessingPeriod = ConstU32<100>; // 100 blocks for AI processing
+    type VotingPeriod = ConstU32<200>; // 200 blocks for voting
+    type AppealPeriod = ConstU32<100>; // 100 blocks for appeals
+    type MinimumAiBond = ConstU128<{5 * UNIT}>; // 0.5 UNIT minimum for AI bond
+    type MinimumFirstAppealBond = ConstU128<{20 * UNIT}>; // 2.0 UNIT minimum for first appeal
+    type MinimumFinalAppealBond = ConstU128<{50 * UNIT}>; // 5.0 UNIT minimum for final appeal
 }

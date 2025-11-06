@@ -8,6 +8,21 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+use frame_support::{
+    dispatch::DispatchResult,
+    traits::{Get},
+};
+use sp_runtime::DispatchError;
+
+// Define the Arbitrable trait that the arbitration pallet will use to interact with projects
+pub trait Arbitrable<ProjectId, Balance, AccountId, BlockNumber> {
+    fn on_ruling(project_id: ProjectId, ruling: Ruling) -> DispatchResult; // Using local Ruling enum
+    fn get_project_budget(project_id: ProjectId) -> Result<Balance, DispatchError>;
+    fn get_project_parties(project_id: ProjectId) -> Result<(AccountId, AccountId), DispatchError>;
+    fn set_project_status_in_dispute(project_id: ProjectId) -> DispatchResult;
+    fn get_project_status(project_id: ProjectId) -> Result<ProjectStatus, DispatchError>;
+}
+
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
@@ -79,6 +94,7 @@ pub mod pallet {
         ClientWins,
         FreelancerWins,
     }
+
 
     #[pallet::config]
     pub trait Config: frame_system::Config {
@@ -463,6 +479,80 @@ pub mod pallet {
             }
             
             lock_id
+        }
+    }
+    
+    // Implementation of the Arbitrable trait for use by arbitration pallet
+    impl<T: Config> Arbitrable<T::ProjectId, BalanceOf<T>, T::AccountId, BlockNumberFor<T>> for Pallet<T> {
+        fn on_ruling(project_id: T::ProjectId, ruling: Ruling) -> DispatchResult {
+            Projects::<T>::try_mutate(project_id, |maybe_project| -> DispatchResult {
+                let project = maybe_project.as_mut().ok_or(Error::<T>::ProjectNotFound)?;
+                
+                // Get the parties involved
+                let freelancer = project.freelancer.as_ref().ok_or(Error::<T>::NotFreelancer)?;
+                let client = &project.client;
+                
+                // Convert arbitration Ruling to local handling
+                match ruling {
+                    Ruling::FreelancerWins => {
+                        // Release funds to freelancer
+                        let lock_id = Self::generate_lock_id(project_id);
+                        T::Currency::remove_lock(lock_id, client); // remove_lock doesn't return Result
+                        
+                        T::Currency::transfer(
+                            client,
+                            freelancer,
+                            project.budget,
+                            ExistenceRequirement::KeepAlive,
+                        )?;
+                        
+                        // Update freelancer and client reputation
+                        T::Reputation::on_project_completed(freelancer, project.budget, 3000, project_id)?; // Default 3-star rating
+                    },
+                    Ruling::ClientWins => {
+                        // For client wins, we just update reputation for dispute resolution
+                        // Funds remain with client (already in escrow)
+                        T::Reputation::on_dispute_outcome(client, freelancer, project_id, project.budget)?;
+                    },
+                }
+                
+                project.status = ProjectStatus::Completed; // Dispute resolved
+                
+                Ok(())
+            })
+        }
+        
+        fn get_project_budget(project_id: T::ProjectId) -> Result<BalanceOf<T>, DispatchError> {
+            let project = Projects::<T>::get(project_id).ok_or(Error::<T>::ProjectNotFound)?;
+            Ok(project.budget)
+        }
+        
+        fn get_project_parties(project_id: T::ProjectId) -> Result<(T::AccountId, T::AccountId), DispatchError> {
+            let project = Projects::<T>::get(project_id).ok_or(Error::<T>::ProjectNotFound)?;
+            let freelancer = project.freelancer.ok_or(Error::<T>::NotFreelancer)?;
+            Ok((project.client.clone(), freelancer))
+        }
+        
+        fn set_project_status_in_dispute(project_id: T::ProjectId) -> DispatchResult {
+            Projects::<T>::try_mutate(project_id, |maybe_project| -> DispatchResult {
+                let project = maybe_project.as_mut().ok_or(Error::<T>::ProjectNotFound)?;
+                
+                // Store the original status before dispute for potential restoration
+                let original_status = project.status;
+                
+                // Only allow setting to dispute status if it's in an appropriate state
+                if original_status == ProjectStatus::Rejected || original_status == ProjectStatus::InReview {
+                    project.status = ProjectStatus::InDispute;
+                    Ok(())
+                } else {
+                    Err(Error::<T>::InvalidStatus.into())
+                }
+            })
+        }
+        
+        fn get_project_status(project_id: T::ProjectId) -> Result<ProjectStatus, DispatchError> {
+            let project = Projects::<T>::get(project_id).ok_or(Error::<T>::ProjectNotFound)?;
+            Ok(project.status)
         }
     }
 }
