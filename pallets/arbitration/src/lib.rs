@@ -478,7 +478,7 @@ pub mod pallet {
     }
 
     impl<T: Config> Pallet<T> {
-        fn calculate_bond(project_id: &T::ProjectId, round: u32) -> Result<BalanceOf<T>, DispatchError> {
+        pub fn calculate_bond(project_id: &T::ProjectId, round: u32) -> Result<BalanceOf<T>, DispatchError> {
             let project_budget = T::Arbitrable::get_project_budget(*project_id)?;
 
             let (bond_percentage, minimum_bond) = match round {

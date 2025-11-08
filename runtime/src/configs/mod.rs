@@ -52,6 +52,7 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_runtime::Perbill;
 use sp_version::RuntimeVersion;
 use xcm::latest::prelude::BodyId;
+use sp_runtime::Permill;
 
 // Local module imports
 use super::{
@@ -320,6 +321,7 @@ parameter_types! {
     pub const MaxApplicantsLength: u32 = 100;
     pub const ReviewPeriod: BlockNumber = 10000;
     pub const MaxJurors: u32 = 100;
+    pub const JurorSlashRatio: Permill = Permill::from_percent(10);
 }
 
 impl pallet_projects::Config for Runtime {
@@ -344,6 +346,7 @@ impl pallet_reputation::Config for Runtime {
     type MaxGoldJurors = ConstU32<100>;
     type MaxSilverJurors = ConstU32<200>;
     type MaxBronzeJurors = ConstU32<200>;
+    type SlashRatio = JurorSlashRatio;
 }
 
 parameter_types! {

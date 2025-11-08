@@ -12,6 +12,7 @@ use sp_runtime::{
 
 use frame_system::EnsureRoot;
 use crate as pallet_reputation;
+use sp_runtime::Permill;
 
 // Configure a mock runtime to test the pallet.
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -87,6 +88,9 @@ impl pallet_balances::Config for Test {
     type RuntimeFreezeReason = ();
     type DoneSlashHandler = ();
 }
+parameter_types! {
+    pub const SlashRatio: Permill = Permill::from_percent(10);
+}
 
 impl pallet_reputation::Config for Test {
     type RuntimeEvent = RuntimeEvent;
@@ -99,6 +103,7 @@ impl pallet_reputation::Config for Test {
     type MaxGoldJurors = ConstU32<100>;
     type MaxSilverJurors = ConstU32<200>;
     type MaxBronzeJurors = ConstU32<200>;
+    type SlashRatio = SlashRatio;
 }
 
 // Build genesis storage according to the mock runtime.

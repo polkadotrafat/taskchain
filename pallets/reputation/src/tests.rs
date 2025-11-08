@@ -1,9 +1,8 @@
-use crate::{mock::*, Error, Event, JurorTier, ReputationStats, ReputationInterface};
-use frame_support::{assert_noop, assert_ok};
+use crate::{mock::*, Error, Event, JurorTier, ReputationStats, ReputationInterface, JurorBusy, JurorStake};
+use frame_support::{assert_noop, assert_ok, traits::Currency};
 use frame_system::RawOrigin;
 use sp_runtime::{AccountId32, Permill};
 
-// Helper function to create an account ID, consistent with your other tests.
 fn account(s: &str) -> AccountId32 {
     AccountId32::new([s.as_bytes(), &[0; 32][s.as_bytes().len()..]].concat().try_into().unwrap())
 }
@@ -256,3 +255,100 @@ fn on_jury_vote_updates_stats_correctly() {
             assert!(!jurors.contains(&charlie));
         });
     }
+
+    // ------- staking & slashing tests -------
+
+#[test]
+fn register_as_juror_reserves_stake() {
+    new_test_ext().execute_with(|| {
+        let alice = account("alice");
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+        ReputationStats::<Test>::mutate(&alice, |s| {
+            s.projects_completed = 10;
+            s.total_earned = 2_000;
+        });
+
+        let stake_amount = Reputation::juror_stake();
+        let _ = Balances::deposit_creating(&alice, stake_amount + 1_000);
+
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+
+        assert_eq!(Balances::reserved_balance(&alice), stake_amount);
+        assert_eq!(Reputation::stake_of(&alice), Some(stake_amount));
+    });
+}
+
+#[test]
+fn deregister_as_juror_unreserves_stake() {
+    new_test_ext().execute_with(|| {
+        let alice = account("alice");
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+        ReputationStats::<Test>::mutate(&alice, |s| {
+            s.projects_completed = 10;
+            s.total_earned = 2_000;
+        });
+
+        let stake = Reputation::juror_stake();
+        let _ = Balances::deposit_creating(&alice, stake + 1_000);
+
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+        assert_ok!(Reputation::deregister_as_juror(RawOrigin::Signed(alice.clone()).into()));
+
+        assert_eq!(Balances::reserved_balance(&alice), 0);
+        assert_eq!(Reputation::stake_of(&alice), None);
+        assert!(!Reputation::juror_opted_in(&alice));
+    });
+}
+
+#[test]
+fn deregister_fails_if_juror_busy() {
+    new_test_ext().execute_with(|| {
+        let alice = account("alice");
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+        ReputationStats::<Test>::mutate(&alice, |s| {
+            s.projects_completed = 10;
+            s.total_earned = 2_000;
+        });
+        let stake = Reputation::juror_stake();
+        let _ = Balances::deposit_creating(&alice, stake + 1_000);
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+
+        // simulate selected in dispute
+        JurorBusy::<Test>::insert(&alice, true);
+
+        assert_noop!(
+            Reputation::deregister_as_juror(RawOrigin::Signed(alice.clone()).into()),
+            Error::<Test>::Busy
+        );
+    });
+}
+
+#[test]
+fn slash_juror_partial_slash_works() {
+    new_test_ext().execute_with(|| {
+        let alice = account("alice");
+        System::set_block_number(1);
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+        ReputationStats::<Test>::mutate(&alice, |s| {
+            s.projects_completed = 10;
+            s.total_earned = 2_000;
+        });
+
+        // --- FIX: Set a non-zero stake for the test ---
+        let stake_amount = 100_000u64;
+        JurorStake::<Test>::put(stake_amount);
+        
+        let _ = Balances::deposit_creating(&alice, stake_amount + 1_000);
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+
+        let before = Balances::reserved_balance(&alice);
+        let slash = <Test as crate::Config>::SlashRatio::get() * stake_amount;
+
+        assert_ok!(Reputation::slash_juror( &alice));
+
+        assert_eq!(Balances::reserved_balance(&alice), before - slash);
+        assert_eq!(Reputation::stake_of(&alice), Some(stake_amount - slash));
+        // Note: The event contains the amount *actually* slashed, which is `slash`.
+        System::assert_last_event(Event::JurorSlashed { account: alice, amount: slash }.into());
+    });
+}

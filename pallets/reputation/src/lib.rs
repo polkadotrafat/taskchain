@@ -55,6 +55,10 @@ pub trait ReputationInterface<AccountId, Balance, ProjectId, BlockNumber, MaxJur
         juror: &AccountId,
         voted_with_majority: bool,
     ) -> DispatchResult;
+
+    fn slash_juror(
+        juror: &AccountId
+    ) -> DispatchResult;
 }
 
 #[frame_support::pallet]
@@ -63,7 +67,7 @@ pub mod pallet {
     use super::*;
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
-    use frame_support::{BoundedVec};
+    use frame_support::{BoundedVec, traits::{Currency, ReservableCurrency, LockableCurrency, EnsureOrigin}};
     use frame_system::WeightInfo;
     use scale_info::TypeInfo;
     use codec::{Encode, Decode, MaxEncodedLen};
@@ -174,7 +178,9 @@ pub mod pallet {
         type WeightInfo: WeightInfo;
         type GovernanceOrigin: EnsureOrigin<Self::RuntimeOrigin>;
         /// Currency
-        type Currency: Currency<Self::AccountId>;
+        type Currency: Currency<Self::AccountId>
+            + ReservableCurrency<Self::AccountId>
+            + LockableCurrency<Self::AccountId>;
         /// The type used to identify projects
         type ProjectId: Member + Parameter + MaxEncodedLen + Copy + Default + sp_runtime::traits::One 
             + sp_runtime::traits::Zero + Add<Output = Self::ProjectId> 
@@ -194,7 +200,11 @@ pub mod pallet {
 
         #[pallet::constant]
         type MaxBronzeJurors: Get<u32>;
-        
+
+        #[pallet::constant]
+        /// The percentage of a juror's stake to be slashed for misbehavior.
+        type SlashRatio: Get<Permill>;
+            
     }
 
 
@@ -258,6 +268,23 @@ pub mod pallet {
     #[pallet::getter(fn next_juror_index)]
     pub type NextJurorIndex<T: Config> = StorageMap<_, Blake2_128Concat, JurorTier, u32, ValueQuery>;
 
+    // ---------------------- staking ----------------------
+    /// Amount reserved when joining the jury.
+    #[pallet::storage]
+    #[pallet::getter(fn juror_stake)]
+    pub type JurorStake<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+
+    /// Reserved stake of an active juror.
+    #[pallet::storage]
+    #[pallet::getter(fn stake_of)]
+    pub type StakeOf<T: Config> =
+        StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>, OptionQuery>;
+
+    /// Simple flag: true if juror is currently selected in an active dispute.
+    #[pallet::storage]
+    #[pallet::getter(fn juror_busy)]
+    pub type JurorBusy<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
+
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
@@ -279,6 +306,7 @@ pub mod pallet {
         JurorRegistered { account: T::AccountId },
         JurorDeregistered { account: T::AccountId },
         JurorAutomaticallyDeregistered { account: T::AccountId },
+        JurorSlashed { account: T::AccountId, amount: BalanceOf<T> },
     }
 
     #[pallet::error]
@@ -293,6 +321,8 @@ pub mod pallet {
         NotRegisteredAsJuror,
         InsufficientTier,
         JurorPoolFull,
+        StakeTooLow,
+        Busy,
     }
 
     #[pallet::call]
@@ -369,8 +399,9 @@ pub mod pallet {
             let tier = Self::calculate_tier_from_stats(&Self::reputation_stats(&who));
             ensure!(tier >= JurorTier::Bronze, Error::<T>::InsufficientTier);
 
-            // 3. (Optional but recommended) Take a stake/bond
-            // T::Currency::reserve(&who, T::JurorStake::get())?;
+            let stake = JurorStake::<T>::get();
+            T::Currency::reserve(&who, stake)?;
+            StakeOf::<T>::insert(&who, stake);
 
             // 4. Add them to the registry and the correct tier list
             JurorRegistry::<T>::insert(&who, true);
@@ -386,19 +417,17 @@ pub mod pallet {
         pub fn deregister_as_juror(origin: OriginFor<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
             ensure!(Self::juror_opted_in(&who), Error::<T>::NotRegisteredAsJuror);
-
-            // 1. (Optional) Return their stake/bond
-            // T::Currency::unreserve(&who, T::JurorStake::get());
-
-            // 2. Remove them from the registry and their tier list
-            let tier = Self::juror_tier(&who); // Get their last known tier
+            ensure!(!Self::juror_busy(&who), Error::<T>::Busy);
+            let stake = StakeOf::<T>::take(&who).ok_or(Error::<T>::NotRegisteredAsJuror)?;
+            T::Currency::unreserve(&who, stake);
+            let tier = Self::juror_tier(&who);
             Self::remove_juror_from_tier_list(&who, tier)?;
             JurorRegistry::<T>::remove(&who);
             JurorTiers::<T>::remove(&who);
-
             Self::deposit_event(Event::JurorDeregistered { account: who });
             Ok(())
         }
+        
     }
 
     impl<T: Config> Pallet<T> {
@@ -553,6 +582,23 @@ pub mod pallet {
             }
 
             selected_jurors
+        }
+
+        pub(crate) fn internal_slash_juror(juror: &T::AccountId) -> DispatchResult {
+            ensure!(Self::juror_opted_in(&juror), Error::<T>::NotRegisteredAsJuror);
+            let stake = StakeOf::<T>::get(&juror).ok_or(Error::<T>::NotRegisteredAsJuror)?;
+            let slash = T::SlashRatio::get() * stake;
+            T::Currency::slash_reserved(&juror, slash);
+            let new_stake = stake.saturating_sub(slash);
+            if new_stake.is_zero() {
+                // auto-kick if stake depleted
+                StakeOf::<T>::remove(&juror);
+                Self::remove_juror_from_juror_registry(juror)?;
+            } else {
+                StakeOf::<T>::insert(&juror, new_stake);
+            }
+            Self::deposit_event(Event::JurorSlashed { account: juror.clone(), amount: slash });
+            Ok(())
         }
 
         pub fn calculate_tier_from_stats(
@@ -873,28 +919,37 @@ pub mod pallet {
             Ok(())
         }
 
-        fn update_juror_tier(account: &T::AccountId) -> DispatchResult {
-            if !Self::juror_opted_in(account) { return Ok(()); }
-
-            let old_tier = Self::juror_tier(account);
-            let new_tier = Self::calculate_tier_from_stats(&Self::reputation_stats(account));
-
-            if old_tier != new_tier {
-                // Always remove from the old tier list first
-                Self::remove_juror_from_tier_list(account, old_tier)?;
-
-                if new_tier == JurorTier::Ineligible {
-                    // User is no longer eligible - fully deregister them
+        pub fn update_juror_tier(account: &T::AccountId) -> DispatchResult {
+            if !Self::juror_opted_in(account) {
+                return Ok(());
+            }
+            let old = Self::juror_tier(account);
+            let new = Self::calculate_tier_from_stats(&Self::reputation_stats(account));
+            if old != new {
+                Self::remove_juror_from_tier_list(account, old)?;
+                if new == JurorTier::Ineligible {
+                    // auto-deregister
+                    if let Some(stake) = StakeOf::<T>::take(account) {
+                        T::Currency::unreserve(account, stake);
+                    }
                     JurorRegistry::<T>::remove(account);
                     JurorTiers::<T>::remove(account);
                     Self::deposit_event(Event::JurorAutomaticallyDeregistered { account: account.clone() });
                 } else {
-                    // User is still eligible but tier changed - update to new tier
-                    Self::add_juror_to_tier_list(account, new_tier)?;
-                    JurorTiers::<T>::insert(account, new_tier);
-                    Self::deposit_event(Event::JurorTierUpdated { account: account.clone()});
+                    Self::add_juror_to_tier_list(account, new)?;
+                    JurorTiers::<T>::insert(account, new);
+                    Self::deposit_event(Event::JurorTierUpdated { account: account.clone() });
                 }
             }
+            Ok(())
+        }
+
+        fn remove_juror_from_juror_registry(juror: &T::AccountId) -> DispatchResult {
+            let tier = Self::juror_tier(juror);
+            Self::remove_juror_from_tier_list(juror, tier)?;
+            JurorRegistry::<T>::remove(juror);
+            JurorTiers::<T>::remove(juror);
+            Self::deposit_event(Event::JurorAutomaticallyDeregistered { account: juror.clone() });
             Ok(())
         }
 
@@ -960,6 +1015,10 @@ impl<T: pallet::Config> ReputationInterface<
         count: u32,
     ) -> BoundedVec<T::AccountId, T::MaxJurors> {
         Self::internal_get_eligible_jurors(min_tier, exclude, count)
+    }
+
+    fn slash_juror(juror: &T::AccountId) -> DispatchResult {
+        Self::internal_slash_juror(juror)
     }
 }
 

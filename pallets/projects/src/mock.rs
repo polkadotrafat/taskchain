@@ -13,6 +13,7 @@ use crate as pallet_projects;
 use pallet_reputation::{ReputationInterface, JurorTier};
 use frame_support::dispatch::DispatchResult;
 use frame_support::BoundedVec;
+use sp_runtime::Permill;
 
 // Configure a mock runtime to test the pallet.
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -120,6 +121,14 @@ impl ReputationInterface<AccountId32, u64, u32, u64, MaxApplicantsLength> for Mo
     fn on_jury_vote(_juror: &AccountId32, _voted_with_majority: bool) -> DispatchResult {
         Ok(())
     }
+
+    fn slash_juror(_juror: &AccountId32) -> DispatchResult {
+        Ok(())
+    }
+}
+
+parameter_types! {
+    pub const SlashRatio: Permill = Permill::from_percent(10);
 }
 
 impl pallet_reputation::Config for Test {
@@ -133,6 +142,7 @@ impl pallet_reputation::Config for Test {
     type MaxGoldJurors = ConstU32<100>;
     type MaxSilverJurors = ConstU32<200>;
     type MaxBronzeJurors = ConstU32<200>;
+    type SlashRatio = SlashRatio;
 }
 
 impl pallet_projects::Config for Test {

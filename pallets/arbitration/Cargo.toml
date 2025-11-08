@@ -37,6 +37,5 @@ std = [
   "pallet-balances/std",  
   "pallet-projects/std",
   "pallet-reputation/std",
-
 ]
 
