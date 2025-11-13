@@ -6,9 +6,9 @@ import { ApiPromise, WsProvider } from '@polkadot/api';
 import { web3Accounts, web3Enable, web3FromSource } from '@polkadot/extension-dapp';
 import { InjectedAccountWithMeta } from '@polkadot/extension-inject/types';
 import { Signer } from '@polkadot/types/types';
+import { WS_PROVIDER } from '@/app/constants';
 
 // The WebSocket endpoint of your local node
-const WS_PROVIDER = 'ws://127.0.0.1:9944';
 
 interface ApiContextType {
   api: ApiPromise | null;

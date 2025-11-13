@@ -15,3 +15,4 @@ default_command = "./target/release/parachain-template-node"
 
 [[parachains.collators]]
 name = "collator-01"
+wsPort = 9944

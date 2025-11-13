@@ -58,6 +58,7 @@ use frame_support::weights::{
 };
 pub use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 pub use sp_runtime::{MultiAddress, Perbill, Permill};
+pub use pallet_reputation;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;

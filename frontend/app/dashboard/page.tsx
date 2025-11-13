@@ -50,7 +50,7 @@ export default function DashboardPage() {
             setIsLoading(true);
             try {
                 const [repDataCodec, projectEntries] = await Promise.all([
-                    api.query.reputation.reputations(selectedAccount.address),
+                    api.query.reputation.reputationStats(selectedAccount.address),
                     api.query.projects.projects.entries()
                 ]);
 

@@ -47,7 +47,7 @@ export default function MemberProfilePage() {
       setIsLoading(true);
       try {
         const [repDataCodec, configCodec] = await Promise.all([
-            api.query.reputation.reputations(accountId),
+            api.query.reputation.reputationStats(accountId),
             api.query.reputation.jurorConfig()
         ]);
 

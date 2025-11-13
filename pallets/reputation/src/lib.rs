@@ -75,6 +75,7 @@ pub mod pallet {
     use sp_runtime::{
 		traits::{ Saturating}
     };
+    use sp_runtime::Vec;
 
     pub type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
@@ -83,7 +84,10 @@ pub mod pallet {
     pub struct Pallet<T>(_);
 
     #[derive(Encode, Decode, Default, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+    #[derive(serde::Serialize, serde::Deserialize)]  // Add this line
     #[scale_info(skip_type_params(Balance, BlockNumber))]
+    #[serde(bound(serialize = "Balance: serde::Serialize, BlockNumber: serde::Serialize"))]
+    #[serde(bound(deserialize = "Balance: serde::Deserialize<'de>, BlockNumber: serde::Deserialize<'de>"))]
     pub struct ReputationData<Balance, BlockNumber> {
         pub registration_block: BlockNumber,
         pub last_activity_block: BlockNumber,
@@ -108,7 +112,7 @@ pub mod pallet {
         
         // --- Juror Metrics (Universal) ---
         pub jury_participation: u32,
-        pub jury_accuracy: Permill, // Voted with majority %
+        pub jury_accuracy: Permill,
     }
 
     #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -324,6 +328,79 @@ pub mod pallet {
         StakeTooLow,
         Busy,
     }
+
+    #[pallet::genesis_config]
+    pub struct GenesisConfig<T: Config> {
+        /// Use a standard Vec for genesis configuration.
+        pub initial_users: Vec<(T::AccountId, ReputationData<BalanceOf<T>, BlockNumberFor<T>>)>,
+        /// Use a standard Vec for genesis configuration.
+        pub initial_jurors: Vec<T::AccountId>,
+        pub juror_stake: BalanceOf<T>,
+    }
+
+    impl<T: Config> Default for GenesisConfig<T> {
+        fn default() -> Self {
+            Self {
+                initial_users: Vec::new(),
+                initial_jurors: Vec::new(),
+                juror_stake: BalanceOf::<T>::zero(),
+            }
+        }
+    }
+
+    #[pallet::genesis_build]
+    impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+        fn build(&self) {
+            // Set the default juror stake amount
+            JurorStake::<T>::put(self.juror_stake);
+
+            // Populate initial reputation stats
+            for (account, stats) in &self.initial_users {
+                ReputationStats::<T>::insert(account, stats.clone());
+            }
+
+            // Register and stake initial jurors
+            for juror_account in &self.initial_jurors {
+                let stats = Pallet::<T>::reputation_stats(juror_account);
+                assert!(stats.registration_block > BlockNumberFor::<T>::zero(), "Initial juror must have reputation data");
+
+                // Reserve stake
+                if !self.juror_stake.is_zero() {
+                    T::Currency::reserve(juror_account, self.juror_stake)
+                        .expect("Initial juror must have enough balance; qed");
+                }
+                
+                // Set juror state
+                StakeOf::<T>::insert(juror_account, self.juror_stake);
+                JurorRegistry::<T>::insert(juror_account, true);
+
+                // Calculate tier and add to the appropriate BoundedVec list
+                let tier = Pallet::<T>::calculate_tier_from_stats(&stats);
+                if tier != JurorTier::Ineligible {
+                    JurorTiers::<T>::insert(juror_account, tier);
+                    
+                    // --- THE KEY CHANGE IS HERE ---
+                    // We modify the BoundedVec storage directly inside the build logic.
+                    // This is safe because we are building from a clean state.
+                    match tier {
+                        JurorTier::Gold => GoldJurors::<T>::try_mutate(|jurors| {
+                            jurors.try_push(juror_account.clone())
+                        }).expect("Genesis juror pool should not be full; qed"),
+                        JurorTier::Silver => SilverJurors::<T>::try_mutate(|jurors| {
+                            jurors.try_push(juror_account.clone())
+                        }).expect("Genesis juror pool should not be full; qed"),
+                        JurorTier::Bronze => BronzeJurors::<T>::try_mutate(|jurors| {
+                            jurors.try_push(juror_account.clone())
+                        }).expect("Genesis juror pool should not be full; qed"),
+                        JurorTier::Ineligible => {
+                            // Should not reach here due to earlier check
+                        },
+                    };
+                }
+            }
+        }
+    }
+
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
