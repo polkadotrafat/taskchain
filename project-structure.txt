@@ -4,13 +4,37 @@
 ├── frontend
 │   ├── app
 │   │   ├── components
+│   │   │   ├── AppealDisputeModal.tsx
+│   │   │   ├── ClientApiProvider.tsx
+│   │   │   ├── CreateProjectModal.tsx
+│   │   │   ├── Header.tsx
+│   │   │   ├── InitiateDisputeModal.tsx
+│   │   │   ├── ProjectCard.tsx
+│   │   │   ├── ReputationCard.tsx
+│   │   │   ├── ui
+│   │   │   │   ├── Badge.tsx
+│   │   │   │   ├── Button.tsx
+│   │   │   │   └── Modal.tsx
 │   │   │   └── WalletConnectButton.tsx
+│   │   ├── constants.ts
 │   │   ├── context
 │   │   │   └── ApiContext.tsx
+│   │   ├── create-project
+│   │   │   └── page.tsx
+│   │   ├── dashboard
+│   │   │   └── page.tsx
 │   │   ├── favicon.ico
 │   │   ├── globals.css
 │   │   ├── layout.tsx
-│   │   └── page.tsx
+│   │   ├── member
+│   │   │   └── [accountId]
+│   │   │       └── page.tsx
+│   │   ├── page.tsx
+│   │   └── project
+│   │       └── [id]
+│   │           ├── page.tsx
+│   │           └── workspace
+│   │               └── page.tsx
 │   ├── eslint.config.mjs
 │   ├── next-env.d.ts
 │   ├── next.config.ts
@@ -4202,6 +4226,13 @@
         │   ├── pallet_recovery-aece18e3ba425554.d
         │   ├── pallet_referenda-c5c70f129628bc79.d
         │   ├── pallet_reputation-f533d4783474768c.d
+        │   ├── pallet_reputation-f533d4783474768c.long-type-1350082023663987615.txt
+        │   ├── pallet_reputation-f533d4783474768c.long-type-17323565698060438355.txt
+        │   ├── pallet_reputation-f533d4783474768c.long-type-17887912104207659770.txt
+        │   ├── pallet_reputation-f533d4783474768c.long-type-2203045257461317127.txt
+        │   ├── pallet_reputation-f533d4783474768c.long-type-6355541224226201009.txt
+        │   ├── pallet_reputation-f533d4783474768c.long-type-859331259177880297.txt
+        │   ├── pallet_reputation-f533d4783474768c.long-type-9177563986852439965.txt
         │   ├── pallet_root_testing-6bb14102b5cc3cd6.d
         │   ├── pallet_scheduler-1e1014dbf1bf9973.d
         │   ├── pallet_session-d837167627e0116f.d
@@ -4824,4 +4855,4 @@
                     ├── release
                     └── wasm32v1-none
 
-309 directories, 4516 files
+317 directories, 4539 files

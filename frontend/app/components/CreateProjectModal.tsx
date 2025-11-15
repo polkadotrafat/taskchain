@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { useApi } from "../context/ApiContext";
+import axios from "axios";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [budget, setBudget] = useState("");
+  const [duration, setDuration] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,7 +26,7 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
       setError("Please connect your wallet first.");
       return;
     }
-    if (!title || !description || !budget) {
+    if (!title || !description || !budget || !duration) {
       setError("Please fill out all fields.");
       return;
     }
@@ -33,23 +35,52 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
     setError("");
 
     try {
-      // Convert budget to the chain's smallest unit (e.g., Planck)
-      // Assuming 12 decimal places for this example.
-      const budgetInPlanck = BigInt(parseFloat(budget) * 10**12);
-      const uri = JSON.stringify({ title, description });
+      // 1. Upload description to IPFS via Pinata
+      const projectJson = { title, description };
+      const blob = new Blob([JSON.stringify(projectJson)], { type: 'application/json' });
+      const data = new FormData();
+      data.append('file', blob, 'project.json');
 
-      const extrinsic = api.tx.projects.createProject(budgetInPlanck.toString(), uri);
-      
-      await extrinsic.signAndSend(selectedAccount.address, { signer }, ({ status, events }) => {
-        if (status.isInBlock) {
-          console.log(`Transaction included in block: ${status.asInBlock}`);
+      const pinataResponse = await axios.post(
+        "https://api.pinata.cloud/pinning/pinFileToIPFS",
+        data,
+        {
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${(data as any)._boundary}`,
+            'pinata_api_key': process.env.NEXT_PUBLIC_PINATA_API_KEY,
+            'pinata_secret_api_key': process.env.NEXT_PUBLIC_PINATA_API_SECRET
+          }
         }
-        if (status.isFinalized) {
-          console.log(`Transaction finalized: ${status.asFinalized}`);
+      );
+
+      const ipfsHash = pinataResponse.data.IpfsHash;
+      if (!ipfsHash) {
+        throw new Error("Failed to get IPFS hash from Pinata.");
+      }
+
+      // 2. Create project on-chain with the IPFS hash as the URI
+      const budgetInPlanck = BigInt(parseFloat(budget) * 10**12);
+      const durationInBlocks = parseInt(duration) * 24 * 60 * 60 / 12; // Assuming 12s block time
+      const uriHex = "0x" + Buffer.from(ipfsHash).toString('hex');
+      const extrinsic = api.tx.projects.createProject(budgetInPlanck.toString(), uriHex, durationInBlocks);
+
+      await new Promise<void>((resolve, reject) => {
+        extrinsic.signAndSend(selectedAccount.address, { signer }, ({ status }) => {
+          if (status.isInBlock) {
+            console.log(`Transaction included in block: ${status.asInBlock}`);
+          }
+          if (status.isFinalized) {
+            console.log(`Transaction finalized: ${status.asFinalized}`);
+            setIsSubmitting(false);
+            onProjectCreated();
+            onClose();
+            resolve();
+          }
+        }).catch((error: any) => {
+          console.error("Transaction failed:", error);
           setIsSubmitting(false);
-          onProjectCreated();
-          onClose();
-        }
+          reject(error);
+        });
       });
 
     } catch (err: any) {
@@ -87,7 +118,7 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
               required
             />
           </div>
-          <div className="mb-6">
+          <div className="mb-4">
             <label htmlFor="budget" className="block text-sm font-medium text-gray-700">Budget (Units)</label>
             <input
               type="number"
@@ -98,6 +129,18 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
               required
               min="0"
               step="0.0001"
+            />
+          </div>
+          <div className="mb-6">
+            <label htmlFor="duration" className="block text-sm font-medium text-gray-700">Duration (Days)</label>
+            <input
+              type="number"
+              id="duration"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900"
+              required
+              min="1"
             />
           </div>
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}

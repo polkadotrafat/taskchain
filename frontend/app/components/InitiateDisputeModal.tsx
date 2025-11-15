@@ -3,15 +3,17 @@
 
 import { useState } from "react";
 import { useApi } from "../context/ApiContext";
+import { Project } from "../constants";
 
 interface InitiateDisputeModalProps {
+  project: Project;
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
-  projectName: string;
+  status: string;
 }
 
-export const InitiateDisputeModal = ({ isOpen, onClose, onConfirm, projectName }: InitiateDisputeModalProps) => {
+export const InitiateDisputeModal = ({ project, isOpen, onClose, onConfirm, status }: InitiateDisputeModalProps) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,7 +34,7 @@ export const InitiateDisputeModal = ({ isOpen, onClose, onConfirm, projectName }
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
       <div className="bg-white rounded-lg p-8 w-full max-w-lg">
-        <h2 className="text-2xl font-bold mb-4 text-gray-800">Initiate Dispute for "{projectName}"</h2>
+        <h2 className="text-2xl font-bold mb-4 text-gray-800">Initiate Dispute for "{project.uri}"</h2>
         <div className="text-gray-600 space-y-4 mb-6">
             <p>You are about to initiate the dispute resolution process for this project. Please review the following information before proceeding.</p>
             <ul className="list-disc list-inside bg-yellow-50 border border-yellow-200 p-4 rounded-md text-sm">
@@ -53,7 +55,7 @@ export const InitiateDisputeModal = ({ isOpen, onClose, onConfirm, projectName }
         </div>
         
         {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-
+        {status && <p className="mt-4 text-center text-sm text-gray-500">{status}</p>}
         <div className="flex items-center justify-end space-x-4">
           <button
             type="button"

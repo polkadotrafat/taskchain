@@ -14,11 +14,34 @@ export const Header = () => {
         <Link href="/" className="text-2xl font-bold text-primary">
           TaskChain
         </Link>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-6">
+          <Link 
+            href="/" 
+            className="text-text-secondary hover:text-primary transition-colors duration-200"
+          >
+            Marketplace
+          </Link>
+          <Link 
+            href="/create-project" 
+            className="bg-primary px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors duration-200"
+          >
+            Create Project
+          </Link>
           {selectedAccount && (
-            <Link href="/dashboard" className="text-text-secondary hover:text-primary">
-              Dashboard
-            </Link>
+            <>
+              <Link
+                href="/dashboard"
+                className="text-text-secondary hover:text-primary transition-colors duration-200"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/jury"
+                className="text-text-secondary hover:text-primary transition-colors duration-200"
+              >
+                Jury Duty
+              </Link>
+            </>
           )}
           <WalletConnectButton />
         </div>

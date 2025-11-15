@@ -2,14 +2,18 @@
 "use client";
 
 import { useState } from "react";
+import { Project, Dispute } from "../constants";
 
 interface AppealDisputeModalProps {
+  project: Project;
+  dispute: Dispute;
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
+  status: string;
 }
 
-export const AppealDisputeModal = ({ isOpen, onClose, onConfirm }: AppealDisputeModalProps) => {
+export const AppealDisputeModal = ({ project, dispute, isOpen, onClose, onConfirm }: AppealDisputeModalProps) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -47,7 +51,7 @@ export const AppealDisputeModal = ({ isOpen, onClose, onConfirm }: AppealDispute
         </div>
         
         {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-
+        {status && <p className="mt-4 text-center text-sm text-gray-500">{status}</p>}
         <div className="flex items-center justify-end space-x-4">
           <button
             type="button"

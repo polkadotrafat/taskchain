@@ -3,7 +3,6 @@
 "use client";
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ApiPromise, WsProvider } from '@polkadot/api';
-import { web3Accounts, web3Enable, web3FromSource } from '@polkadot/extension-dapp';
 import { InjectedAccountWithMeta } from '@polkadot/extension-inject/types';
 import { Signer } from '@polkadot/types/types';
 import { WS_PROVIDER } from '@/app/constants';
@@ -29,28 +28,62 @@ export const ApiProvider = ({ children }: { children: ReactNode }) => {
 
   // Effect to initialize the API connection
   useEffect(() => {
-    const setup = async () => {
-      const provider = new WsProvider(WS_PROVIDER);
-      const apiPromise = new ApiPromise({ provider });
-      
-      apiPromise.on('connected', () => console.log('API connected'));
-      apiPromise.on('error', (err) => console.error('API error', err));
+    let isCancelled = false; // To handle component unmounting
 
-      await apiPromise.isReady;
-      console.log('API is ready');
-      setApi(apiPromise);
+    const setup = async () => {
+      try {
+        const provider = new WsProvider(WS_PROVIDER);
+        
+        // Create API with specific options to handle newer extensions
+        const apiPromise = new ApiPromise({ 
+          provider,
+          // Configure to handle newer chain features gracefully
+          signedExtensions: undefined, // Use default behavior for handling signed extensions
+          rpc: {}, // Default RPC configuration
+        });
+
+        apiPromise.on('connected', () => {
+          if (!isCancelled) {
+            console.log('API connected');
+          }
+        });
+        apiPromise.on('disconnected', () => {
+          if (!isCancelled) {
+            console.log('API disconnected');
+          }
+        });
+        apiPromise.on('error', (err) => {
+          if (!isCancelled) {
+            console.error('API error', err);
+          }
+        });
+
+        // Wait for the API to be ready
+        await apiPromise.isReady;
+        if (!isCancelled) {
+          console.log('API is ready');
+          setApi(apiPromise);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error('Failed to connect to API:', error);
+        }
+      }
     };
 
     setup();
 
+    // Cleanup function
     return () => {
+      isCancelled = true;
       api?.disconnect();
     };
-  }, [api]);
+  }, []); // Removed [api] dependency to prevent re-initialization
 
   // Function to connect to the wallet extensions
   const connect = async () => {
     try {
+      const { web3Enable, web3Accounts } = await import('@polkadot/extension-dapp');
       const extensions = await web3Enable('TaskChain Demo');
       if (extensions.length === 0) {
         alert('No wallet extension found. Please install Polkadot.js, Talisman, or SubWallet.');
@@ -69,6 +102,7 @@ export const ApiProvider = ({ children }: { children: ReactNode }) => {
   const setSelectedAccount = async (account: InjectedAccountWithMeta) => {
     setSelectedAccountState(account);
     if (api) {
+        const { web3FromSource } = await import('@polkadot/extension-dapp');
         const injector = await web3FromSource(account.meta.source);
         setSigner(injector.signer);
     }

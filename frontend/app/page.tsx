@@ -24,96 +24,102 @@ export default function Home() {
 
   const fetchProjects = async () => {
     if (!api) return;
+    console.log("Fetching projects...");
     setIsLoading(true);
-    // Fetch all entries from the `projects` storage map
-    const projectEntries = await api.query.projects.projects.entries();
-    
-    const fetchedProjects = projectEntries.map(([key, value]) => {
-      const id = Number(key.args[0].toString());
-      const projectData = value as any; // value is a Codec
-      
-      // Convert codec to a plain JS object for safe property access
-      const pd = projectData.isNone ? {} : projectData.unwrap().toJSON();
-      
-      // Normalize fields
-      const client = String(pd.client ?? "");
-      const budget = String(api.createType('Balance', pd.budget).toHuman() ?? "");
-      const status = String(pd.status ?? "");
-      const uri = (() => {
-        const raw = pd.uri;
-        if (typeof raw === "string") {
-          try {
-            if (raw.startsWith("0x")) {
-              const bytes = Uint8Array.from(
-                raw.slice(2).match(/.{1,2}/g)!.map((b) => parseInt(b, 16))
-              );
-              return new TextDecoder().decode(bytes);
+    try {
+      // Fetch all entries from the `projects` storage map
+      const projectEntries = await api.query.projects.projects.entries();
+
+      const fetchedProjects = projectEntries.map(([key, value]) => {
+        const id = Number(key.args[0].toString());
+        const projectData = value as any; // value is a Codec
+
+        // Convert codec to a plain JS object for safe property access
+        const pd = projectData.isNone ? {} : (projectData as any).unwrap().toJSON();
+
+        // Normalize fields
+        const client = String(pd.client ?? "");
+        const budget = String(api.createType('Balance', pd.budget).toHuman() ?? "");
+        const status = String(pd.status ?? "");
+        const uri = (() => {
+          const raw = pd.uri;
+          if (typeof raw === "string") {
+            try {
+              if (raw.startsWith("0x")) {
+                const bytes = Uint8Array.from(
+                  raw.slice(2).match(/.{1,2}/g)!.map((b) => parseInt(b, 16))
+                );
+                return new TextDecoder().decode(bytes);
+              }
+              return raw;
+            } catch {
+              return raw;
             }
-            return raw;
-          } catch {
-            return raw;
+          } else if (Array.isArray(raw)) {
+            return new TextDecoder().decode(new Uint8Array(raw));
+          } else {
+            return String(raw ?? "");
           }
-        } else if (Array.isArray(raw)) {
-          return new TextDecoder().decode(new Uint8Array(raw));
-        } else {
-          return String(raw ?? "");
-        }
-      })();
+        })();
 
-      return {
-        id,
-        client,
-        budget,
-        status,
-        uri,
-      };
-    });
+        return {
+          id,
+          client,
+          budget,
+          status,
+          uri,
+        };
+      });
 
-    // Filter for only open projects for the marketplace view
-    setProjects(fetchedProjects.filter(p => p.status === 'Created'));
-    setIsLoading(false);
+      // Filter for only open projects for the marketplace view
+      setProjects(fetchedProjects.filter(p => p.status === 'Created'));
+      console.log("Projects fetched successfully.");
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+    } finally {
+      setIsLoading(false);
+      console.log("Finished fetching projects.");
+    }
   };
 
-  useEffect(() => {
-    if (!api) return;
+    useEffect(() => {
+      console.log("API object changed:", api);
+      if (!api) return;
 
-    let unsub: () => void;
-
-    const subscribeToEvents = async () => {
-        // Optional: Subscribe to new projects
-        interface ChainEvent {
+      const subscribeToEvents = async () => {
+        try {
+          // Optional: Subscribe to new projects
+          interface ChainEvent {
             section: string;
-            method: string;
+            method:string;
             [key: string]: any;
-        }
+          }
 
-        interface EventRecord {
+          interface EventRecord {
             event: ChainEvent;
             phase?: any;
             topics?: any[];
             [key: string]: any;
-        }
+          }
 
-        unsub = await api.query.system.events((events: EventRecord[]) => {
+          api.query.system.events((events: EventRecord[]) => {
             events.forEach((record: EventRecord) => {
-                const { event } = record;
-                if (event.section === 'projects' && event.method === 'ProjectCreated') {
-                    console.log('ProjectCreated event detected, refetching projects...');
-                    fetchProjects(); // Re-fetch projects when a new one is created
-                }
+              const { event } = record;
+              if (event.section === 'projects' && event.method === 'ProjectCreated') {
+                console.log('ProjectCreated event detected, refetching projects...');
+                fetchProjects(); // Re-fetch projects when a new one is created
+              }
             });
-        }) as any;
-    }
+          });
+        } catch (error) {
+          console.error('Error subscribing to events:', error);
+        }
+      };
 
-    fetchProjects();
-    subscribeToEvents();
+      fetchProjects();
+      subscribeToEvents();
 
-    return () => {
-      // To prevent memory leaks, properly unsubscribe
-      unsub && unsub();
-    };
-
-  }, [api]);
+    }, [api]);
 
   const handleProjectCreated = () => {
     // The event listener will automatically refetch the projects.
@@ -127,7 +133,7 @@ export default function Home() {
         <h1 className="text-5xl font-extrabold text-text-primary">
           Decentralized Work, Verifiable Results.
         </h1>
-        <button 
+        <button
           onClick={() => setIsModalOpen(true)}
           className="mt-8 bg-primary text-white font-bold py-3 px-6 rounded-lg hover:bg-primary-hover"
         >
@@ -135,7 +141,7 @@ export default function Home() {
         </button>
       </div>
 
-      <CreateProjectModal 
+      <CreateProjectModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onProjectCreated={handleProjectCreated}
@@ -143,7 +149,13 @@ export default function Home() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isLoading ? (
-          <p>Loading projects...</p>
+          <div className="col-span-full text-center py-12">
+            <p>Loading projects...</p>
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="col-span-full text-center py-12">
+            <p>No projects available at the moment.</p>
+          </div>
         ) : (
           projects.map((project) => (
             <ProjectCard key={project.id} project={project} />
