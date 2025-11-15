@@ -1,5 +1,5 @@
 
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use crate as pallet_arbitration;
 use frame_support::{
     parameter_types,
@@ -137,11 +137,47 @@ fn account(id: &str) -> AccountId32 {
     AccountId32::from(sp_core::sr25519::Public::from_raw(padded_id))
 }
 
+use std::collections::HashMap;
+
+thread_local! {
+    pub static PROJECT_PARTIES: RefCell<HashMap<ProjectId, (AccountId32, AccountId32)>> = RefCell::new(HashMap::new());
+    pub static PROJECT_BUDGETS: RefCell<HashMap<ProjectId, Balance>> = RefCell::new(HashMap::new());
+    static LAST_RULING: RefCell<Option<(ProjectId, Ruling)>> = RefCell::new(None);
+}
+
+impl MockArbitrable {
+    pub fn set_project_parties(project_id: ProjectId, client: AccountId32, freelancer: AccountId32) {
+        PROJECT_PARTIES.with(|p| {
+            p.borrow_mut().insert(project_id, (client, freelancer));
+        });
+    }
+
+    pub fn set_project_budget(project_id: ProjectId, budget: Balance) {
+        PROJECT_BUDGETS.with(|b| {
+            b.borrow_mut().insert(project_id, budget);
+        });
+    }
+
+    pub fn last_ruling() -> Option<(ProjectId, Ruling)> {
+        LAST_RULING.with(|l| l.borrow().clone())
+    }
+}
 
 impl Arbitrable<ProjectId, Balance, AccountId32, BlockNumber> for MockArbitrable {
-    fn on_ruling(_project_id: ProjectId, _ruling: Ruling) -> DispatchResult { Ok(()) }
-    fn get_project_budget(_project_id: ProjectId) -> Result<Balance, DispatchError> { Ok(1000) }
-    fn get_project_parties(_project_id: ProjectId) -> Result<(AccountId32, AccountId32), DispatchError> { Ok((account("alice"), account("bob"))) }
+    fn on_ruling(project_id: ProjectId, ruling: Ruling) -> DispatchResult {
+        LAST_RULING.with(|l| *l.borrow_mut() = Some((project_id, ruling)));
+        Ok(())
+    }
+    fn get_project_budget(project_id: ProjectId) -> Result<Balance, DispatchError> {
+        PROJECT_BUDGETS.with(|b| {
+            b.borrow().get(&project_id).copied().ok_or(DispatchError::Unavailable)
+        })
+    }
+    fn get_project_parties(project_id: ProjectId) -> Result<(AccountId32, AccountId32), DispatchError> {
+        PROJECT_PARTIES.with(|p| {
+            p.borrow().get(&project_id).cloned().ok_or(DispatchError::Unavailable)
+        })
+    }
     fn set_project_status_in_dispute(_project_id: ProjectId) -> DispatchResult { Ok(()) }
     fn get_project_status(_project_id: ProjectId) -> Result<ProjectStatus, DispatchError> { Ok(ProjectStatus::Created) }
 }

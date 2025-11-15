@@ -110,7 +110,7 @@ fn juror_tier_updates_automatically_on_promotion() {
 }
 
 #[test]
-fn juror_tier_demotes_and_deregisters_on_dispute_loss() {
+fn juror_tier_allows_single_dispute_loss() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);
         let alice = account("alice");
@@ -127,14 +127,58 @@ fn juror_tier_demotes_and_deregisters_on_dispute_loss() {
         assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
         assert!(Reputation::gold_jurors().contains(&alice)); // Pre-condition check
 
-        // Act: Alice loses a dispute to Bob
+        // Act: Alice loses a dispute to Bob - with the new logic, a single loss shouldn't disqualify
         System::set_block_number(2);
         assert_ok!(Reputation::on_dispute_outcome(&bob, &alice, 1, 1000));
-        
-        // Assert: Alice is now Ineligible and has been completely removed from all juror pools
-        // and the registry because she lost a dispute.
+
+        // Assert: Alice should still be eligible as a juror since she only lost 1 out of 1 disputes (100% loss rate)
+        // but with only 1 total dispute, she doesn't meet the "more than 2 disputes" threshold for disqualification
+        assert_ne!(Reputation::juror_tier(&alice), JurorTier::Ineligible);
+        assert!(Reputation::gold_jurors().contains(&alice) || Reputation::silver_jurors().contains(&alice) || Reputation::bronze_jurors().contains(&alice));
+        assert!(Reputation::juror_opted_in(&alice));
+    });
+}
+
+#[test]
+fn juror_tier_demotes_with_high_loss_rate() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+        let alice = account("alice");
+        let bob = account("opponent1");
+        let charlie = account("opponent2");
+        let david = account("opponent3");
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(alice.clone()).into()));
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(bob.clone()).into()));
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(charlie.clone()).into()));
+        assert_ok!(Reputation::register_user(RawOrigin::Signed(david.clone()).into()));
+
+        // Arrange: Give Alice Bronze tier stats and register her as a juror (lower tier needed to make test more visible)
+        ReputationStats::<Test>::mutate(&alice, |stats| {
+            stats.projects_completed = 10; // Bronze level
+            stats.total_earned = 5000;
+            stats.disputes_won = 0; // No wins yet
+            stats.disputes_lost = 0; // No losses yet
+        });
+        assert_ok!(Reputation::register_as_juror(RawOrigin::Signed(alice.clone()).into()));
+
+        // Act: Alice loses 3 out of 4 disputes (75% loss rate) - this should trigger disqualification
+        // because loss rate > 50% AND total disputes > 2
+        System::set_block_number(2);
+        // Alice loses to opponents (so opponents win, Alice loses)
+        assert_ok!(Reputation::on_dispute_outcome(&bob, &alice, 1, 1000)); // Alice loses
+        assert_ok!(Reputation::on_dispute_outcome(&charlie, &alice, 2, 1000)); // Alice loses
+        assert_ok!(Reputation::on_dispute_outcome(&david, &alice, 3, 1000)); // Alice loses
+        // Alice wins 1 to show the ratio is 3 losses to 1 win = 75% loss rate
+        assert_ok!(Reputation::on_dispute_outcome(&alice, &bob, 4, 1000)); // Alice wins
+
+        // Update tier to reflect new reputation stats
+        assert!(Reputation::update_juror_tier(&alice).is_ok());
+
+        // Assert: With 3 losses out of 4 total disputes (75% loss rate > 50% and 4 > 2), Alice should be disqualified
         assert_eq!(Reputation::juror_tier(&alice), JurorTier::Ineligible);
         assert!(!Reputation::gold_jurors().contains(&alice));
+        assert!(!Reputation::silver_jurors().contains(&alice));
+        assert!(!Reputation::bronze_jurors().contains(&alice));
         assert!(!Reputation::juror_opted_in(&alice));
 
         // Check for the automatic deregistration event

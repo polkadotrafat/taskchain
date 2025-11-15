@@ -688,8 +688,15 @@ pub mod pallet {
             const BRONZE_PROJECTS: u32 = 5;
             const BRONZE_EARNED: u128 = 1000;
 
-            if stats.disputes_lost > 0 {
-                return JurorTier::Ineligible;
+            // More nuanced eligibility: allow jurors with good performance history
+            // but penalize those with high dispute loss rates
+            let total_disputes = stats.disputes_won.saturating_add(stats.disputes_lost);
+            if total_disputes > 0 {
+                // Only disqualify if dispute loss rate is too high (e.g., > 50% and more than 2 disputes)
+                let loss_rate = (stats.disputes_lost.saturating_mul(1000)) / total_disputes;
+                if loss_rate > 500 && total_disputes > 2 {  // 50% loss rate with more than 2 disputes
+                    return JurorTier::Ineligible;
+                }
             }
 
             let earned_as_u128: u128 = stats.total_earned.try_into().unwrap_or(0);
