@@ -1,4 +1,3 @@
-<div align="center">
 
 # TaskChain
 
@@ -11,7 +10,6 @@ Its core features are:
     2. Human Jury (Round 2 & 3): The losing party can appeal the decision to a jury of high-reputation peers, selected from a pool of staked users. The process uses escalating bonds to deter frivolous appeals.
 * Economic Security: Jurors must stake tokens to participate. This "skin in the game" incentivizes fair and thoughtful voting, as misbehavior can lead to their stake being slashed.
 
-</div>
 
 ## Getting Started
 
@@ -91,7 +89,6 @@ This pallet handles dispute resolution. It manages a multi-tiered arbitration pr
 *   `create_dispute(origin, project_id, evidence_uri)`: A freelancer initiates a dispute after their work is rejected.
     *   `origin`: The freelancer initiating the dispute.
     *   `project_id`: The ID of the disputed project.
-    *   `evidence_uri`: A URI pointing to evidence supporting the freelancer's case.
 *   `submit_ruling(origin, project_id, ruling)`: The AI oracle submits its ruling.
     *   `origin`: The AI oracle.
     *   `project_id`: The ID of the disputed project.
