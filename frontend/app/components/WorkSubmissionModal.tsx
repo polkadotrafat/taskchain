@@ -85,28 +85,54 @@ export const WorkSubmissionModal = ({ project, isOpen, onClose, onConfirm }: Wor
         metadataHex
       );
 
-      await new Promise<void>((resolve, reject) => {
-        extrinsic.signAndSend(
-          selectedAccount.address,
-          { signer },
-          ({ status }) => {
-            if (status.isInBlock) {
-              console.log(`Transaction included in block: ${status.asInBlock}`);
-            }
-            if (status.isFinalized) {
-              console.log(`Transaction finalized: ${status.asFinalized}`);
+      // signAndSend returns an unsubscribe function, not a promise
+      // We'll handle transaction status updates directly in the callback
+      extrinsic.signAndSend(
+        selectedAccount.address,
+        { signer },
+        ({ status, events, dispatchError }) => {
+          if (status.isInBlock) {
+            console.log(`Transaction included in block: ${status.asInBlock}`);
+          }
+          if (status.isFinalized) {
+            console.log(`Transaction finalized: ${status.asFinalized}`);
+
+            // Check if there was a dispatch error
+            if (dispatchError) {
+              console.error("Transaction dispatch error:", dispatchError);
+              let errorMsg = dispatchError.toString();
+              if (dispatchError.isModule) {
+                try {
+                  const decoded = api?.registry.findMetaError(dispatchError.asModule);
+                  errorMsg = `${decoded?.section}.${decoded?.name}: ${decoded?.docs}`;
+                } catch (e) {
+                  console.error("Error decoding dispatch error:", e);
+                }
+              }
+              setError(errorMsg);
               setIsSubmitting(false);
+              return;
+            }
+
+            // Check for success events
+            let success = false;
+            events.forEach(({ event: { method, section } }) => {
+              if (section === 'system' && method === 'ExtrinsicSuccess') {
+                console.log('Transaction successful');
+                success = true;
+              }
+            });
+
+            setIsSubmitting(false);
+            if (success) {
               onConfirm();
               onClose();
-              resolve();
+            } else {
+              setError("Transaction completed but may not have executed successfully");
             }
           }
-        ).catch((error: any) => {
-          console.error("Transaction failed:", error);
-          setIsSubmitting(false);
-          reject(error);
-        });
-      });
+        }
+      );
     } catch (err: any) {
       setError(err.message || "An unknown error occurred.");
       setIsSubmitting(false);

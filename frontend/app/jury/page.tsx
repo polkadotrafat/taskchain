@@ -20,6 +20,7 @@ interface JurorDispute {
   hasVoted: boolean;
 }
 
+
 export default function JuryDashboard() {
   const { api, selectedAccount } = useApi();
   const [disputes, setDisputes] = useState<JurorDispute[]>([]);

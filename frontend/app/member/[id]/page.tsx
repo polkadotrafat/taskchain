@@ -1,4 +1,4 @@
-// frontend/app/member/[accountId]/page.tsx
+// frontend/app/member/[id]/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -50,7 +50,7 @@ import { ReputationCard } from "@/app/components/ReputationCard";
 export default function MemberProfilePage() {
   const { api, selectedAccount } = useApi();
   const params = useParams();
-  const accountId = params.accountId as string;
+  const id = params.id as string;
 
   const [reputation, setReputation] = useState<ReputationData | null>(null);
   const [jurorConfig, setJurorConfig] = useState<JurorConfig | null>(null);
@@ -58,15 +58,15 @@ export default function MemberProfilePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!api || !accountId) return;
+    if (!api || !id) return;
 
     const fetchData = async () => {
       setIsLoading(true);
       try {
         // Fetch reputation data and juror tier separately since they are stored in different locations
         const [repCodec, jurorTierCodec] = await Promise.all([
-          api.query.reputation.reputationStats(accountId),
-          api.query.reputation.jurorTiers(accountId)  // Note: jurorTiers not jurorTier
+          api.query.reputation.reputationStats(id),
+          api.query.reputation.jurorTiers(id)  // Note: jurorTiers not jurorTier
         ]);
 
         console.log("Raw repCodec:", repCodec);
@@ -154,19 +154,19 @@ export default function MemberProfilePage() {
     };
 
     fetchData();
-  }, [api, accountId]);
+  }, [api, id]);
 
   if (isLoading) return <div className="text-center p-10">Loading reputation...</div>;
   if (error) return <div className="text-center p-10 text-red-500">{error}</div>;
   if (!reputation) return <div className="text-center p-10">No data available for this user.</div>;
 
-  const isOwnProfile = selectedAccount?.address === accountId;
+  const isOwnProfile = selectedAccount?.address === id;
 
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-800">User Profile</h1>
-        <p className="text-sm font-mono text-gray-500 break-all">{accountId}</p>
+        <p className="text-sm font-mono text-gray-500 break-all">{id}</p>
       </div>
       <div className="mb-6">
         <ReputationCard reputation={reputation} />

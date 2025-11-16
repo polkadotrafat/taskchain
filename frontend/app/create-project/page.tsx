@@ -1,13 +1,14 @@
 // frontend/app/create-project/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApi } from "../context/ApiContext";
 import axios from "axios";
 import Link from "next/link";
+import Button from "../components/ui/Button";
 
 export default function CreateProjectPage() {
-  const { api, selectedAccount, signer } = useApi();
+  const { api, selectedAccount, signer, connect, isConnecting, isApiReady } = useApi();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [budget, setBudget] = useState("");
@@ -15,13 +16,43 @@ export default function CreateProjectPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Check wallet connection on component mount
+  useEffect(() => {
+    const checkConnection = async () => {
+      if (!selectedAccount) {
+        try {
+          await connect();
+        } catch (error) {
+          console.error("Failed to connect wallet:", error);
+        }
+      }
+      setIsLoading(false);
+    };
+    
+    checkConnection();
+  }, [selectedAccount, connect]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!api || !selectedAccount || !signer) {
-      setError("Please connect your wallet first.");
+    
+    // More robust wallet connection check
+    if (!isApiReady) {
+      setError("API not connected. Please refresh the page.");
       return;
     }
+    
+    if (!selectedAccount) {
+      setError("No account selected. Please connect your wallet.");
+      return;
+    }
+    
+    if (!signer) {
+      setError("Signer not available. Please reconnect your wallet.");
+      return;
+    }
+    
     if (!title || !description || !budget || !duration) {
       setError("Please fill out all fields.");
       return;
@@ -31,6 +62,16 @@ export default function CreateProjectPage() {
     setError("");
 
     try {
+      // Check if Pinata credentials are available and not placeholders
+      if (
+        !process.env.NEXT_PUBLIC_PINATA_API_KEY ||
+        !process.env.NEXT_PUBLIC_PINATA_API_SECRET ||
+        process.env.NEXT_PUBLIC_PINATA_API_KEY === 'your_pinata_api_key' ||
+        process.env.NEXT_PUBLIC_PINATA_API_SECRET === 'your_pinata_api_secret'
+      ) {
+        throw new Error("Pinata API credentials are not configured or are placeholders. Please check your .env.local file.");
+      }
+
       // 1. Upload description to IPFS via Pinata
       const projectJson = { title, description };
       const blob = new Blob([JSON.stringify(projectJson)], { type: 'application/json' });
@@ -42,7 +83,7 @@ export default function CreateProjectPage() {
         data,
         {
           headers: {
-            'Content-Type': `multipart/form-data; boundary=${(data as any)._boundary}`,
+            'Content-Type': `multipart/form-data`,
             'pinata_api_key': process.env.NEXT_PUBLIC_PINATA_API_KEY,
             'pinata_secret_api_key': process.env.NEXT_PUBLIC_PINATA_API_SECRET
           }
@@ -56,12 +97,17 @@ export default function CreateProjectPage() {
 
       // 2. Create project on-chain with the IPFS hash as the URI
       const budgetInPlanck = BigInt(parseFloat(budget) * 10**12);
-      const durationInBlocks = parseInt(duration) * 24 * 60 * 60 / 12; // Assuming 12s block time
+      const durationInBlocks = parseInt(duration) * 24 * 60 * 60 / 12;
       const uriHex = "0x" + Buffer.from(ipfsHash).toString('hex');
-      const extrinsic = api.tx.projects.createProject(budgetInPlanck.toString(), uriHex, durationInBlocks);
+      
+      const extrinsic = api!.tx.projects.createProject(
+        budgetInPlanck.toString(), 
+        uriHex, 
+        durationInBlocks
+      );
 
       await new Promise<void>((resolve, reject) => {
-        extrinsic.signAndSend(selectedAccount.address, { signer }, ({ status }) => {
+        extrinsic.signAndSend(selectedAccount.address, { signer }, ({ status, events }) => {
           if (status.isInBlock) {
             console.log(`Transaction included in block: ${status.asInBlock}`);
           }
@@ -74,15 +120,30 @@ export default function CreateProjectPage() {
         }).catch((error: any) => {
           console.error("Transaction failed:", error);
           setIsSubmitting(false);
+          setError(error.message || "Transaction failed");
           reject(error);
         });
       });
 
     } catch (err: any) {
+      console.error("Create project error:", err);
       setError(err.message || "An unknown error occurred.");
       setIsSubmitting(false);
     }
   };
+
+  if (isLoading || isConnecting || !isApiReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Loading...</h2>
+          <p className="text-gray-600">
+            {isConnecting ? "Connecting to wallet..." : !isApiReady ? "Connecting to the network..." : "Loading..."}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!selectedAccount) {
     return (
@@ -90,34 +151,34 @@ export default function CreateProjectPage() {
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Please Connect Your Wallet</h2>
           <p className="text-gray-600 mb-4">You need to connect your wallet to create a project.</p>
-          <Link
-            href="/"
-            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover"
-          >
-            Go to Marketplace
-          </Link>
+          <div className="space-x-4">
+            <Button
+              onClick={connect}
+              disabled={isConnecting}
+            >
+              {isConnecting ? "Connecting..." : "Connect Wallet"}
+            </Button>
+            <Link href="/">
+              <Button variant="secondary">Go to Marketplace</Button>
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
+  // Rest of your component remains the same...
   if (success) {
     return (
       <div className="max-w-2xl mx-auto p-8 bg-white rounded-lg shadow-md">
         <h1 className="text-3xl font-bold text-green-600 mb-6">Project Created Successfully!</h1>
         <p className="mb-6">Your project has been created and is now available on the marketplace.</p>
         <div className="flex space-x-4">
-          <Link
-            href="/"
-            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover"
-          >
-            Back to Marketplace
+          <Link href="/">
+            <Button>Back to Marketplace</Button>
           </Link>
-          <Link
-            href="/dashboard"
-            className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
-          >
-            Go to Dashboard
+          <Link href="/dashboard">
+            <Button variant="secondary">Go to Dashboard</Button>
           </Link>
         </div>
       </div>
@@ -127,8 +188,17 @@ export default function CreateProjectPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-800 mb-8">Create New Project</h1>
+      <div className="mb-4 p-4 bg-blue-50 rounded-md">
+        <p className="text-sm text-blue-800">
+          Connected as: <span className="font-medium">{selectedAccount.meta.name}</span>
+          <br />
+          Address: <span className="font-mono text-xs">{selectedAccount.address}</span>
+        </p>
+      </div>
 
+      {/* Rest of your form JSX remains the same */}
       <form onSubmit={handleSubmit} className="bg-white shadow-md rounded-lg p-8">
+        {/* ... existing form fields ... */}
         <div className="mb-6">
           <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">Project Title</label>
           <input
@@ -189,19 +259,16 @@ export default function CreateProjectPage() {
         {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
 
         <div className="flex items-center justify-end space-x-4 pt-6 border-t border-gray-200">
-          <Link
-            href="/"
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-          >
-            Cancel
+          <Link href="/">
+            <Button variant="secondary">Cancel</Button>
           </Link>
-          <button
+          <Button
             type="submit"
-            className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary-hover disabled:bg-gray-400"
+            isLoading={isSubmitting}
             disabled={isSubmitting}
           >
-            {isSubmitting ? "Creating Project..." : "Create Project"}
-          </button>
+            Create Project
+          </Button>
         </div>
       </form>
     </div>

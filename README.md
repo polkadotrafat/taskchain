@@ -34,6 +34,8 @@ cargo build --release
  pop up ./network.toml
 ```
 
+You can intercat with the parachain at https://polkadot.js.org/apps/?rpc=ws://127.0.0.1:9933#/explorer
+
 More instructions here
 > 👉 https://learn.onpop.io/v/appchains/guides/running-your-parachain
 
@@ -42,6 +44,18 @@ More instructions here
  cd frontend
  npm run dev
 ```
+Your frontend will typically boot up at http://localhost:3000/
+
+Import these five funded dev accounts into your wallet to test the blockchain
+```
+Alice Client 	"bottom drive obey lake curtain smoke basket hold race lonely fit walk//Alice"
+Bob Freelancer	"bottom drive obey lake curtain smoke basket hold race lonely fit walk//Bob"
+Charlie Juror	"bottom drive obey lake curtain smoke basket hold race lonely fit walk//Charlie"
+Dave Juror	"bottom drive obey lake curtain smoke basket hold race lonely fit walk//Dave"
+Eve Juror	"bottom drive obey lake curtain smoke basket hold race lonely fit walk//Eve"
+```
+
+Additionally inside the frontend folder copy env.example to .env and add the openai and pinata keys to make the frontend functional. 
 
 ### Documentation
 

@@ -11,6 +11,8 @@ import { DisputeDetails } from "@/app/components/DisputeDetails";
 
 import { InitiateDisputeModal } from "@/app/components/InitiateDisputeModal";
 import { WorkSubmissionModal } from "@/app/components/WorkSubmissionModal";
+import { ProjectApplicants } from "@/app/components/ProjectApplicants";
+import { Button } from "@/app/components/ui/Button";
 
 // Define a type for the project data, extending it for more details
 interface ProjectDetailsType {
@@ -24,6 +26,19 @@ interface ProjectDetailsType {
   uri: string;
 }
 
+// Define submitted work type
+interface SubmittedWork {
+  id: number;
+  projectId: number;
+  submittedBy: string;
+  uri: string;
+  contentHash: string;
+  metadata: string;
+  submittedAt: string;
+  title?: string;
+  description?: string;
+}
+
 // Define dispute type
 interface Dispute {
   status: string;
@@ -34,6 +49,23 @@ interface Dispute {
   startBlock: number;
 }
 
+// Helper function to convert hex to string
+function hexToString(hex: string): string {
+  if (!hex.startsWith('0x')) {
+    hex = '0x' + hex;
+  }
+  try {
+    const bytes = new Uint8Array(
+      hex.slice(2).match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
+    );
+    return new TextDecoder().decode(bytes);
+  } catch (error) {
+    console.error('Error decoding hex string:', error);
+    return hex; // Return original hex if decoding fails
+  }
+}
+
+
 // --- Main Page Component ---
 export default function ProjectPage() {
   const { api, selectedAccount, signer } = useApi();
@@ -41,8 +73,10 @@ export default function ProjectPage() {
   const id = Number(params.id);
 
   const [project, setProject] = useState<ProjectDetailsType | null>(null);
+  const [submittedWork, setSubmittedWork] = useState<SubmittedWork | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [hasApplied, setHasApplied] = useState(false);
 
   // --- Data Fetching ---
   useEffect(() => {
@@ -81,18 +115,66 @@ export default function ProjectPage() {
           client: String(pd.client),
           freelancer: pd.freelancer ? String(pd.freelancer) : null,
           budget: String(api.createType('Balance', pd.budget).toHuman()),
-          status: Object.keys(pd.status)[0], // The status is an enum, get the key
+          status: pd.status,
           title,
           description,
           uri: pd.uri,
         });
+
+        // Fetch submitted work if project is in review
+        if (pd.status === 'InReview' || pd.status === 'InDispute' || pd.status === 'Completed' || pd.status === 'Rejected') {
+          // Check if work submission exists in the project data based on the actual blockchain structure
+          if (pd.workSubmission && pd.workSubmission.uri) {
+            const work: SubmittedWork = {
+              id: 0,
+              projectId: id,
+              submittedBy: pd.freelancer || "unknown", // Assuming freelancer submitted the work
+              uri: pd.workSubmission.uri,
+              contentHash: pd.workSubmission.contentHash || "",
+              metadata: pd.workSubmission.metadata || "",
+              submittedAt: new Date().toISOString(), // Should be derived from submissionBlock if available
+            };
+
+            // Try to fetch work details from IPFS if URI exists
+            if (pd.workSubmission.uri) {
+              try {
+                // The URI in the example is already a CID, not hex encoded
+                // Check if it's hex encoded or direct CID
+                let ipfsHash;
+                if (pd.workSubmission.uri.startsWith('0x')) {
+                  ipfsHash = hexToString(pd.workSubmission.uri.slice(2));
+                } else {
+                  // If it's already a CID (not hex encoded), use it directly
+                  ipfsHash = pd.workSubmission.uri;
+                }
+
+                const workDetails = await axios.get(`https://ipfs.io/ipfs/${ipfsHash}`);
+                work.title = workDetails.data.title || `Work for Project #${id}`;
+                work.description = workDetails.data.description || workDetails.data.content || work.metadata;
+              } catch (ipfsError) {
+                console.error("Failed to fetch work from IPFS:", ipfsError);
+                work.title = `Work for Project #${id}`;
+                work.description = "Failed to load work details from IPFS.";
+              }
+            }
+
+            setSubmittedWork(work);
+          }
+        }
+
+        // Fetch applicants and check if current user has applied
+        if (selectedAccount) {
+          const applicantsCodec = await api.query.projects.projectApplicants(id);
+          const applicantsList = (applicantsCodec as any).map((applicant: any) => applicant.toString());
+          setHasApplied(applicantsList.includes(selectedAccount.address));
+        }
 
         setIsLoading(false);
       });
     };
 
     fetchProjectDetails();
-  }, [api, id]);
+  }, [api, id, selectedAccount]);
 
   if (isLoading) return <div className="text-center p-10">Loading project details...</div>;
   if (error) return <div className="text-center p-10 text-red-500">{error}</div>;
@@ -103,7 +185,7 @@ export default function ProjectPage() {
       <ProjectDetails project={project} />
       {selectedAccount && signer && (
         <>
-          <ProjectActions project={project} currentUser={selectedAccount} />
+          <ProjectActions project={project} currentUser={selectedAccount} hasApplied={hasApplied} submittedWork={submittedWork} />
           {project.status === 'InDispute' && (
             <DisputeDetails project={project} currentUser={selectedAccount} />
           )}
@@ -156,7 +238,7 @@ const ProjectDetails = ({ project }: { project: ProjectDetailsType }) => {
 
 
 // --- ProjectActions Component ---
-const ProjectActions = ({ project, currentUser }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta }) => {
+const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta, hasApplied: boolean, submittedWork: SubmittedWork | null }) => {
     const { api, signer } = useApi();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
@@ -206,7 +288,7 @@ const ProjectActions = ({ project, currentUser }: { project: ProjectDetailsType,
                 if (status.isFinalized) {
                     console.log(`Transaction finalized: ${status.asFinalized}`);
                     setIsSubmitting(false);
-                    // The modal will close itself, and the page subscription will update the UI
+                    window.location.reload();
                     resolve();
                 }
             }).catch((error: any) => {
@@ -224,68 +306,79 @@ const ProjectActions = ({ project, currentUser }: { project: ProjectDetailsType,
         if (!api || !signer) return;
 
         setIsSubmitting(true);
+        setError(""); // Clear any previous errors
 
         try {
-            // Submit evidence to IPFS first
-            const evidenceData = {
-                projectId: project.id,
-                title: `Evidence for dispute #${project.id}`,
-                description: `Evidence for dispute regarding project #${project.id}`
-            };
+            const extrinsic = api.tx.arbitration.createDispute(project.id);
 
-            const evidenceBlob = new Blob([JSON.stringify(evidenceData)], { type: 'application/json' });
-            const evidenceFormData = new FormData();
-            evidenceFormData.append('file', evidenceBlob, `dispute-${project.id}-evidence.json`);
+            // Better transaction handling to ensure state is always updated
+            extrinsic.signAndSend(
+                currentUser.address,
+                { signer },
+                ({ status, events, dispatchError }) => {
+                    if (status.isInBlock) {
+                        console.log(`Transaction included in block: ${status.asInBlock}`);
+                    }
+                    if (status.isFinalized) {
+                        console.log(`Transaction finalized: ${status.asFinalized}`);
 
-            const pinataResponse = await axios.post(
-                "https://api.pinata.cloud/pinning/pinFileToIPFS",
-                evidenceFormData,
-                {
-                    headers: {
-                        'Content-Type': `multipart/form-data; boundary=${(evidenceFormData as any)._boundary}`,
-                        'pinata_api_key': process.env.NEXT_PUBLIC_PINATA_API_KEY,
-                        'pinata_secret_api_key': process.env.NEXT_PUBLIC_PINATA_API_SECRET
+                        // Check for dispatch errors
+                        if (dispatchError) {
+                            console.error("Transaction dispatch error:", dispatchError);
+                            let errorMsg = dispatchError.toString();
+                            if (dispatchError.isModule) {
+                                try {
+                                    const decoded = api?.registry.findMetaError(dispatchError.asModule);
+                                    errorMsg = `${decoded?.section}.${decoded?.name}: ${decoded?.docs}`;
+                                } catch (e) {
+                                    console.error("Error decoding dispatch error:", e);
+                                }
+                            }
+                            setError(errorMsg);
+                            setIsSubmitting(false);
+                            return;
+                        }
+
+                        // Check for success events
+                        let success = false;
+                        let disputeCreated = false;
+
+                        events.forEach(({ event: { method, section } }) => {
+                            if (section === 'system' && method === 'ExtrinsicSuccess') {
+                                console.log('Dispute initiation successful');
+                                success = true;
+                            }
+                            if (section === 'arbitration' && method === 'DisputeCreated') {
+                                console.log('Dispute created event emitted');
+                                disputeCreated = true;
+                            }
+                        });
+
+                        setIsSubmitting(false);
+                        if (success && disputeCreated) {
+                            setIsDisputeModalOpen(false);
+                            window.location.reload(); // Refresh to show updated status
+                        } else {
+                            setError("Transaction completed but dispute may not have been created successfully");
+                        }
                     }
                 }
-            );
-
-            const ipfsHash = pinataResponse.data.IpfsHash;
-            if (!ipfsHash) {
-                throw new Error("Failed to get IPFS hash from Pinata.");
-            }
-
-            const extrinsic = api.tx.arbitration.createDispute(project.id, ipfsHash);
-
-            await new Promise<void>((resolve, reject) => {
-                extrinsic.signAndSend(
-                    currentUser.address,
-                    { signer },
-                    ({ status }) => {
-                        if (status.isInBlock) {
-                            console.log(`Transaction included in block: ${status.asInBlock}`);
-                        }
-                        if (status.isFinalized) {
-                            console.log(`Transaction finalized: ${status.asFinalized}`);
-                            setIsSubmitting(false);
-                            setIsDisputeModalOpen(false);
-                            resolve();
-                        }
-                    }
-                ).catch((error: any) => {
-                    console.error("Transaction failed:", error);
-                    setIsSubmitting(false);
-                    reject(error);
-                });
+            ).catch((error: any) => {
+                console.error("Transaction error:", error);
+                setError(error.message || "Transaction failed");
+                setIsSubmitting(false);
             });
         } catch (err: any) {
             setError(err.message || "An unknown error occurred.");
             setIsSubmitting(false);
+            console.error("Error initiating dispute:", err);
         }
     };
 
     const isClient = project.client === currentUser.address;
     const isFreelancer = project.freelancer === currentUser.address;
     const isPotentialFreelancer = !isClient && !project.freelancer;
+
 
     return (
         <>
@@ -320,13 +413,20 @@ const ProjectActions = ({ project, currentUser }: { project: ProjectDetailsType,
                 <h2 className="text-xl font-bold mb-4">Actions</h2>
                 <div className="flex flex-wrap gap-4">
                     {project.status === 'Created' && isPotentialFreelancer && (
-                        <button
+                        <Button
                             onClick={() => handleGenericAction('projects', 'applyForProject', [project.id])}
-                            disabled={isSubmitting}
-                            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
+                            disabled={isSubmitting || hasApplied}
+                            isLoading={isSubmitting}
                         >
-                            {isSubmitting ? 'Applying...' : 'Apply for Project'}
-                        </button>
+                            {hasApplied ? 'Applied' : 'Apply for Project'}
+                        </Button>
+                    )}
+                    {project.status === 'Created' && isClient && !project.freelancer && (
+                        <ProjectApplicants
+                            projectId={project.id}
+                            client={project.client}
+                            onApplicantAssigned={() => window.location.reload()}
+                        />
                     )}
                     {project.status === 'Created' && isClient && project.freelancer && (
                         <button
@@ -348,20 +448,50 @@ const ProjectActions = ({ project, currentUser }: { project: ProjectDetailsType,
                     )}
                     {project.status === 'InReview' && isClient && (
                         <>
-                            <button
-                                onClick={() => handleGenericAction('projects', 'acceptWork', [project.id, 4])}
-                                disabled={isSubmitting}
-                                className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 disabled:bg-gray-400"
-                            >
-                                {isSubmitting ? 'Accepting...' : 'Accept Work (4/5)'}
-                            </button>
-                            <button
-                                onClick={() => handleGenericAction('projects', 'rejectWork', [project.id, "ipfs://reason"])}
-                                disabled={isSubmitting}
-                                className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 disabled:bg-gray-400"
-                            >
-                                {isSubmitting ? 'Rejecting...' : 'Reject Work'}
-                            </button>
+                            {/* Display submitted work */}
+                            <div className="mb-6 p-4 bg-gray-50 rounded-md">
+                                <h3 className="text-lg font-semibold mb-2">Submitted Work</h3>
+                                {submittedWork ? (
+                                    <div>
+                                        <h4 className="font-medium text-gray-800">{submittedWork.title || `Work for Project #${project.id}`}</h4>
+                                        <p className="text-gray-600 mt-2">{submittedWork.description}</p>
+                                        <div className="mt-3 text-sm text-gray-500">
+                                            <p>Submitted by: {submittedWork.submittedBy}</p>
+                                            {submittedWork.uri && (
+                                                <p>
+                                                    IPFS: <a
+                                                        href={`https://ipfs.io/ipfs/${hexToString(submittedWork.uri.slice(2))}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-blue-600 hover:underline"
+                                                    >
+                                                        {hexToString(submittedWork.uri.slice(2))}
+                                                    </a>
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-gray-500">Work details are loading or not available.</p>
+                                )}
+                            </div>
+
+                            <div className="flex space-x-4">
+                                <button
+                                    onClick={() => handleGenericAction('projects', 'acceptWork', [project.id, 4])}
+                                    disabled={isSubmitting}
+                                    className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 disabled:bg-gray-400"
+                                >
+                                    {isSubmitting ? 'Accepting...' : 'Accept Work (4/5)'}
+                                </button>
+                                <button
+                                    onClick={() => handleGenericAction('projects', 'rejectWork', [project.id, "ipfs://reason"])}
+                                    disabled={isSubmitting}
+                                    className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 disabled:bg-gray-400"
+                                >
+                                    {isSubmitting ? 'Rejecting...' : 'Reject Work'}
+                                </button>
+                            </div>
                         </>
                     )}
                     {project.status === 'Rejected' && isFreelancer && (

@@ -1,7 +1,7 @@
 // frontend/app/components/CreateProjectModal.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApi } from "../context/ApiContext";
 import axios from "axios";
 
@@ -12,7 +12,7 @@ interface CreateProjectModalProps {
 }
 
 export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: CreateProjectModalProps) => {
-  const { api, selectedAccount, signer } = useApi();
+  const { api, selectedAccount, signer, connect, isConnecting } = useApi();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [budget, setBudget] = useState("");
@@ -20,12 +20,32 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Auto-connect wallet when modal opens
+  useEffect(() => {
+    if (isOpen && !selectedAccount && !isConnecting) {
+      connect();
+    }
+  }, [isOpen, selectedAccount, connect, isConnecting]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!api || !selectedAccount || !signer) {
-      setError("Please connect your wallet first.");
+    
+    // More robust wallet connection check
+    if (!api) {
+      setError("API not connected. Please refresh the page.");
       return;
     }
+    
+    if (!selectedAccount) {
+      setError("No account selected. Please connect your wallet.");
+      return;
+    }
+    
+    if (!signer) {
+      setError("Signer not available. Please reconnect your wallet.");
+      return;
+    }
+    
     if (!title || !description || !budget || !duration) {
       setError("Please fill out all fields.");
       return;
@@ -35,6 +55,11 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
     setError("");
 
     try {
+      // Check if Pinata credentials are available
+      if (!process.env.NEXT_PUBLIC_PINATA_API_KEY || !process.env.NEXT_PUBLIC_PINATA_API_SECRET) {
+        throw new Error("Pinata API credentials not configured.");
+      }
+
       // 1. Upload description to IPFS via Pinata
       const projectJson = { title, description };
       const blob = new Blob([JSON.stringify(projectJson)], { type: 'application/json' });
@@ -46,7 +71,7 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
         data,
         {
           headers: {
-            'Content-Type': `multipart/form-data; boundary=${(data as any)._boundary}`,
+            'Content-Type': `multipart/form-data`,
             'pinata_api_key': process.env.NEXT_PUBLIC_PINATA_API_KEY,
             'pinata_secret_api_key': process.env.NEXT_PUBLIC_PINATA_API_SECRET
           }
@@ -60,12 +85,17 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
 
       // 2. Create project on-chain with the IPFS hash as the URI
       const budgetInPlanck = BigInt(parseFloat(budget) * 10**12);
-      const durationInBlocks = parseInt(duration) * 24 * 60 * 60 / 12; // Assuming 12s block time
+      const durationInBlocks = parseInt(duration) * 24 * 60 * 60 / 12; // Convert days to blocks
       const uriHex = "0x" + Buffer.from(ipfsHash).toString('hex');
-      const extrinsic = api.tx.projects.createProject(budgetInPlanck.toString(), uriHex, durationInBlocks);
+      
+      const extrinsic = api.tx.projects.createProject(
+        budgetInPlanck.toString(), 
+        uriHex, 
+        durationInBlocks
+      );
 
       await new Promise<void>((resolve, reject) => {
-        extrinsic.signAndSend(selectedAccount.address, { signer }, ({ status }) => {
+        extrinsic.signAndSend(selectedAccount.address, { signer }, ({ status, events }) => {
           if (status.isInBlock) {
             console.log(`Transaction included in block: ${status.asInBlock}`);
           }
@@ -74,16 +104,23 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
             setIsSubmitting(false);
             onProjectCreated();
             onClose();
+            // Reset form
+            setTitle("");
+            setDescription("");
+            setBudget("");
+            setDuration("");
             resolve();
           }
         }).catch((error: any) => {
           console.error("Transaction failed:", error);
           setIsSubmitting(false);
+          setError(error.message || "Transaction failed");
           reject(error);
         });
       });
 
     } catch (err: any) {
+      console.error("Create project error:", err);
       setError(err.message || "An unknown error occurred.");
       setIsSubmitting(false);
     }
@@ -95,6 +132,34 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
     <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
       <div className="bg-white rounded-lg p-8 w-full max-w-md">
         <h2 className="text-2xl font-bold mb-4 text-gray-800">Create a New Project</h2>
+        
+        {/* Wallet Connection Status */}
+        {isConnecting && (
+          <div className="mb-4 p-3 bg-blue-50 rounded-md">
+            <p className="text-sm text-blue-800">Connecting to wallet...</p>
+          </div>
+        )}
+        
+        {!selectedAccount && !isConnecting && (
+          <div className="mb-4 p-3 bg-yellow-50 rounded-md">
+            <p className="text-sm text-yellow-800 mb-2">Please connect your wallet first.</p>
+            <button
+              onClick={connect}
+              className="px-3 py-1 bg-yellow-200 text-yellow-800 rounded text-sm hover:bg-yellow-300"
+            >
+              Connect Wallet
+            </button>
+          </div>
+        )}
+        
+        {selectedAccount && (
+          <div className="mb-4 p-3 bg-green-50 rounded-md">
+            <p className="text-sm text-green-800">
+              Connected as: <span className="font-medium">{selectedAccount.meta.name}</span>
+            </p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>
@@ -105,8 +170,10 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
               onChange={(e) => setTitle(e.target.value)}
               className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900"
               required
+              disabled={!selectedAccount || isSubmitting}
             />
           </div>
+          
           <div className="mb-4">
             <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
             <textarea
@@ -116,8 +183,10 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
               rows={4}
               className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900"
               required
+              disabled={!selectedAccount || isSubmitting}
             />
           </div>
+          
           <div className="mb-4">
             <label htmlFor="budget" className="block text-sm font-medium text-gray-700">Budget (Units)</label>
             <input
@@ -129,8 +198,10 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
               required
               min="0"
               step="0.0001"
+              disabled={!selectedAccount || isSubmitting}
             />
           </div>
+          
           <div className="mb-6">
             <label htmlFor="duration" className="block text-sm font-medium text-gray-700">Duration (Days)</label>
             <input
@@ -141,9 +212,12 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
               className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900"
               required
               min="1"
+              disabled={!selectedAccount || isSubmitting}
             />
           </div>
+          
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+          
           <div className="flex items-center justify-end space-x-4">
             <button
               type="button"
@@ -156,9 +230,9 @@ export const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }: Create
             <button
               type="submit"
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary-hover disabled:bg-gray-400"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !selectedAccount}
             >
-              {isSubmitting ? "Submitting..." : "Create Project"}
+              {isSubmitting ? "Creating..." : "Create Project"}
             </button>
           </div>
         </form>
