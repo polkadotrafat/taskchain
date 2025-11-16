@@ -54,8 +54,7 @@ fn initiate_ai_dispute_works() {
         // --- ACT ---
         assert_ok!(Arbitration::create_dispute(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
         // --- ASSERT ---
         // 1. Check that the dispute was created with correct state
@@ -88,22 +87,17 @@ fn initiate_ai_dispute_works() {
                 }
             })
             .collect();
-        // Should have at least 2 arbitration events
-        assert!(arbitration_events.len() >= 2, "Should have at least 2 arbitration events");
-        // Check that DisputeCreated event was emitted
-        let dispute_created_exists = arbitration_events.iter().any(|event| {
-            matches!(event, Event::DisputeCreated { project_id: pid, who } if *pid == project_id && *who == freelancer)
-        });
-        assert!(dispute_created_exists, "DisputeCreated event should be emitted");
-        // The last event should be ArbitrationCostReserved (as shown in test output)
-        System::assert_last_event(RuntimeEvent::Arbitration(Event::ArbitrationCostReserved {
+        // Should have 1 arbitration event
+        assert_eq!(arbitration_events.len(), 1, "Should have 1 arbitration event");
+        // The last event should be DisputeCreated
+        System::assert_last_event(RuntimeEvent::Arbitration(Event::DisputeCreated {
             project_id,
-            amount: 2000, // This matches the amount shown in the test failure
+            who: freelancer,
         }));
         // 5. Verify dispute state
         assert!(dispute.jurors.is_empty(), "No jurors should be assigned yet for AI dispute");
         assert!(dispute.ruling.is_none(), "No ruling should exist yet");
-        assert!(!dispute.evidence_uri.is_empty() || dispute.evidence_uri.is_empty(), "Evidence URI should be handled correctly");
+        assert!(!dispute.requirements_uri.is_empty() && !dispute.submission_uri.is_empty(), "Evidence URIs should be stored");
     });
 }
 
@@ -152,8 +146,7 @@ fn submit_ai_ruling_works() {
 
         assert_ok!(Arbitration::create_dispute(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         let ruling = Ruling::ClientWins;
@@ -204,7 +197,7 @@ fn enforce_ruling_after_single_ai_round_works() {
         
         // 2. Freelancer initiates dispute (Round 1)
         System::set_block_number(1);
-        assert_ok!(Arbitration::create_dispute(RuntimeOrigin::signed(freelancer.clone()), project_id, BoundedVec::default()));
+        assert_ok!(Arbitration::create_dispute(RuntimeOrigin::signed(freelancer.clone()), project_id));
         
         // --- CAPTURE INITIAL STATE ---
         let freelancer_reserved_before = Balances::reserved_balance(&freelancer);
@@ -285,7 +278,7 @@ fn enforce_ruling_freelancer_loses_ai_round() {
         
         // 2. Freelancer initiates dispute (Round 1)
         System::set_block_number(1);
-        assert_ok!(Arbitration::create_dispute(RuntimeOrigin::signed(freelancer.clone()), project_id, BoundedVec::default()));
+        assert_ok!(Arbitration::create_dispute(RuntimeOrigin::signed(freelancer.clone()), project_id));
         
         // --- CAPTURE INITIAL STATE ---
         let freelancer_reserved_before = Balances::reserved_balance(&freelancer);
@@ -375,8 +368,7 @@ fn appeal_ruling_works() {
         System::set_block_number(1);
         assert_ok!(Arbitration::create_dispute(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
         let ruling = Ruling::ClientWins;
         System::set_block_number(2);
@@ -392,8 +384,7 @@ fn appeal_ruling_works() {
         // --- ACT ---
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
         // --- ASSERT ---
         let dispute = Arbitration::disputes(project_id).expect("Dispute should exist");
@@ -479,8 +470,7 @@ fn cast_vote_and_finalize_round_works() {
 
         assert_ok!(Arbitration::create_dispute(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         let ruling = Ruling::ClientWins;
@@ -500,8 +490,7 @@ fn cast_vote_and_finalize_round_works() {
 
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         // --- ACT ---
@@ -537,8 +526,7 @@ fn finalize_round_records_juror_rewards() {
 
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         // majority = freelancer wins - 2 jurors vote with majority, 1 against
@@ -583,8 +571,7 @@ fn enforce_final_ruling_completes_dispute_and_makes_payments() {
         // This appeal should now succeed.
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         // freelancer wins => client is loser
@@ -622,8 +609,7 @@ fn finalize_round_distributes_rewards_to_jurors_who_voted_with_majority() {
         let _ = Balances::deposit_creating(&freelancer, 10 * UNIT);
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
         // Majority vote: 2 for freelancer, 1 for client
         assert_ok!(Arbitration::cast_vote(RuntimeOrigin::signed(juror1.clone()), project_id, Vote::ForFreelancer));
@@ -667,8 +653,7 @@ fn enforce_final_ruling_pays_out_juror_rewards_and_handles_bonds() {
         // Appeal by freelancer
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         // Cast votes (freelancer wins)
@@ -707,8 +692,7 @@ fn dispute_flow_full_slash_path() {
 
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
 
         // both jurors vote same way -> no slash
@@ -742,8 +726,7 @@ fn arbitration_costs_are_tracked_correctly() {
         // Appeal adds more costs
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
         
         let cost_after_appeal = Arbitration::get_total_arbitration_costs(project_id);
@@ -766,8 +749,7 @@ fn appeal_bonds_are_handled_correctly() {
         
         assert_ok!(Arbitration::appeal_ruling(
             RuntimeOrigin::signed(freelancer.clone()),
-            project_id,
-            BoundedVec::default()
+            project_id
         ));
         
         let after_appeal_reserved = Balances::reserved_balance(&freelancer);
@@ -808,7 +790,7 @@ fn create_project_and_dispute_to_round2() -> (u32, AccountId32, AccountId32) {
     assert_ok!(Projects::start_work(RuntimeOrigin::signed(client.clone()), project_id, freelancer.clone()));
 
     System::set_block_number(1);
-    assert_ok!(Arbitration::create_dispute(RuntimeOrigin::signed(freelancer.clone()), project_id, BoundedVec::default()));
+    assert_ok!(Arbitration::create_dispute(RuntimeOrigin::signed(freelancer.clone()), project_id));
     System::set_block_number(2);
     assert_ok!(Arbitration::submit_ruling(RuntimeOrigin::root(), project_id, Ruling::ClientWins));
 

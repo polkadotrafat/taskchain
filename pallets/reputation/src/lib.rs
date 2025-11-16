@@ -10,7 +10,7 @@ mod tests;
 
 use frame_support::{
     dispatch::DispatchResult,
-    traits::{Currency, Get},
+    traits::{Get},
     BoundedVec,
 };
 use sp_runtime::Permill;
@@ -555,7 +555,7 @@ pub mod pallet {
             winner: &T::AccountId,
             loser: &T::AccountId,
             project_id: T::ProjectId,
-            project_value: BalanceOf<T>,
+            _project_value: BalanceOf<T>,
         ) -> DispatchResult {
             ReputationStats::<T>::try_mutate(winner, |stats| -> DispatchResult {
                 ensure!(stats.registration_block > BlockNumberFor::<T>::zero(), Error::<T>::UserNotRegistered);
@@ -665,7 +665,7 @@ pub mod pallet {
             ensure!(Self::juror_opted_in(&juror), Error::<T>::NotRegisteredAsJuror);
             let stake = StakeOf::<T>::get(&juror).ok_or(Error::<T>::NotRegisteredAsJuror)?;
             let slash = T::SlashRatio::get() * stake;
-            T::Currency::slash_reserved(&juror, slash);
+            let _ = T::Currency::slash_reserved(&juror, slash);
             let new_stake = stake.saturating_sub(slash);
             if new_stake.is_zero() {
                 // auto-kick if stake depleted

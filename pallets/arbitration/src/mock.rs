@@ -1,5 +1,5 @@
 
-use std::cell::{RefCell, RefMut};
+use std::cell::{RefCell};
 use crate as pallet_arbitration;
 use frame_support::{
     parameter_types,
@@ -180,6 +180,11 @@ impl Arbitrable<ProjectId, Balance, AccountId32, BlockNumber> for MockArbitrable
     }
     fn set_project_status_in_dispute(_project_id: ProjectId) -> DispatchResult { Ok(()) }
     fn get_project_status(_project_id: ProjectId) -> Result<ProjectStatus, DispatchError> { Ok(ProjectStatus::Created) }
+	fn get_evidence_uris(_project_id: u32) -> Result<(BoundedVec<u8, ConstU32<256>>, BoundedVec<u8, ConstU32<256>>), sp_runtime::DispatchError> {
+		let uri1: BoundedVec<u8, ConstU32<256>> = "req_uri".as_bytes().to_vec().try_into().unwrap();
+		let uri2: BoundedVec<u8, ConstU32<256>> = "sub_uri".as_bytes().to_vec().try_into().unwrap();
+		Ok((uri1, uri2))
+	}
 }
 
 parameter_types! {
@@ -219,7 +224,6 @@ impl pallet_arbitration::Config for Test {
     type AiOracleOrigin = frame_system::EnsureRoot<AccountId32>;
     type Arbitrable = MockArbitrable;
     type Reputation = MockReputation;
-    type MaxEvidenceMeta = ConstU32<256>;
     type MaxJurors = MaxApplicantsLength;
     type PalletId = ArbitrationPalletId;
     type MinJurors = ConstU32<3>;

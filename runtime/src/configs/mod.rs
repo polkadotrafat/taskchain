@@ -361,7 +361,6 @@ impl pallet_arbitration::Config for Runtime {
     type AiOracleOrigin = EnsureRoot<AccountId>; // For now, using root as oracle origin
     type Arbitrable = Projects; // Projects pallet implements the Arbitrable trait
     type Reputation = Reputation;
-    type MaxEvidenceMeta = ConstU32<256>;
     type MaxJurors = MaxApplicantsLength;
     type PalletId = ArbitrationPalletId;
     type MinJurors = ConstU32<3>;

@@ -16,11 +16,11 @@ pub mod pallet {
     use frame_system::pallet_prelude::*;
     use frame_support::{BoundedVec,PalletId,
         traits::{Currency, ReservableCurrency, ExistenceRequirement, Imbalance},
-        storage::types::{StorageNMap, Key},
+        
         Blake2_128Concat,
     };
     use sp_runtime::traits::AccountIdConversion;
-    use frame_support::pallet_prelude::NMapKey;
+    
 
     use sp_runtime::{
 		traits::{ Saturating}
@@ -31,7 +31,7 @@ pub mod pallet {
     use frame_support::BoundedBTreeMap;
     use sp_runtime::traits::Zero;
 
-    use pallet_projects::Arbitrable;
+    use pallet_projects::{Arbitrable, EvidenceUri};
     use pallet_reputation::ReputationInterface;
     use pallet_reputation::JurorTier;
     type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
@@ -67,7 +67,8 @@ pub mod pallet {
     #[scale_info(skip_type_params(T))]
     pub struct DisputeInfo<T: Config> {
         pub status: DisputeStatus,
-        pub evidence_uri: BoundedVec<u8, T::MaxEvidenceMeta>,
+        pub requirements_uri: EvidenceUri,
+        pub submission_uri: EvidenceUri,
         pub start_block: BlockNumberFor<T>,
         pub ruling: Option<Ruling>,
         pub round: u32,
@@ -110,9 +111,6 @@ pub mod pallet {
         #[pallet::constant]
         type MinJurors: Get<u32>;
 
-
-        #[pallet::constant]
-        type MaxEvidenceMeta: Get<u32>;
         #[pallet::constant]
         type MaxJurors: Get<u32>;
         #[pallet::constant]
@@ -242,7 +240,6 @@ pub mod pallet {
         pub fn create_dispute(
             origin: OriginFor<T>, 
             project_id: T::ProjectId, 
-            evidence_uri: BoundedVec<u8, T::MaxEvidenceMeta>
         ) -> DispatchResult {
             let freelancer = ensure_signed(origin)?;
             ensure!(!Disputes::<T>::contains_key(project_id), Error::<T>::DisputeAlreadyExists);
@@ -254,9 +251,13 @@ pub mod pallet {
             // Calculate and reserve arbitration costs for initial AI processing
             let initial_arbitration_cost = Self::calculate_arbitration_cost(&project_id, 1)?;
             ArbitrationCosts::<T>::insert(project_id, initial_arbitration_cost);
+            
+            let (requirements_uri, submission_uri) = T::Arbitrable::get_evidence_uris(project_id)?;
+
             let new_dispute = DisputeInfo {
                 status: DisputeStatus::AiProcessing,
-                evidence_uri,
+                requirements_uri,
+                submission_uri,
                 start_block: <frame_system::Pallet<T>>::block_number(),
                 ruling: None,
                 round: 1,
@@ -266,7 +267,6 @@ pub mod pallet {
             Disputes::<T>::insert(project_id, new_dispute);
             T::Arbitrable::set_project_status_in_dispute(project_id)?;
             Self::deposit_event(Event::DisputeCreated { project_id, who: freelancer });
-            Self::deposit_event(Event::ArbitrationCostReserved { project_id, amount: initial_arbitration_cost });
             Ok(())
         }
 
@@ -296,8 +296,7 @@ pub mod pallet {
         #[pallet::weight(Weight::default())]
         pub fn appeal_ruling(
             origin: OriginFor<T>,
-            project_id: T::ProjectId,
-            evidence_uri: BoundedVec<u8, T::MaxEvidenceMeta>
+            project_id: T::ProjectId
         ) -> DispatchResult {
             let appellant = ensure_signed(origin)?;
             let mut dispute = Disputes::<T>::get(project_id).ok_or(Error::<T>::DisputeNotFound)?;
@@ -352,7 +351,6 @@ pub mod pallet {
             dispute.votes.clear();
             dispute.ruling = None;
             dispute.start_block = current_block;
-            dispute.evidence_uri = evidence_uri;
             
             Disputes::<T>::insert(project_id, dispute);
             
@@ -500,7 +498,7 @@ pub mod pallet {
         pub fn calculate_appeal_bond(project_id: &T::ProjectId, round: u32) -> Result<BalanceOf<T>, DispatchError> {
             let project_budget = T::Arbitrable::get_project_budget(*project_id)?;
             
-            let (bond_percentage, minimum_bond) = match round {
+            let (bond_percentage, _minimum_bond) = match round {
                 1 => (5u32, T::MinimumAiBond::get()),
                 2 => (20u32, T::MinimumFirstAppealBond::get()),
                 3 => (50u32, T::MinimumFinalAppealBond::get()),
@@ -619,7 +617,7 @@ pub mod pallet {
                     let (imbalance, _) = T::Currency::slash_reserved(&appellant, bond_amount);
                     // Deposit the slashed funds into the pallet's account to cover costs.
                     total_slashed_funds = total_slashed_funds.saturating_add(imbalance.peek());
-                    T::Currency::deposit_creating(&pallet_account, imbalance.peek());
+                    let _ = T::Currency::deposit_creating(&pallet_account, imbalance.peek());
                     drop(imbalance);
                 }
             }
@@ -657,20 +655,6 @@ pub mod pallet {
             // --- 4. Clean up all financial storage for this dispute ---
             Self::cleanup_arbitration_storage(project_id);
 
-            Ok(())
-        }
-        /// Return appeal bonds to all appellants
-        fn return_all_appeal_bonds(project_id: T::ProjectId) -> DispatchResult {
-            // Iterate through all appeal bonds for this project
-            for (_round, (appellant, bond_amount)) in AppealBonds::<T>::iter_prefix(project_id) {
-                <T as pallet::Config>::Currency::unreserve(&appellant, bond_amount);
-                
-                Self::deposit_event(Event::AppealBondReturned { 
-                    project_id, 
-                    appellant, 
-                    amount: bond_amount 
-                });
-            }
             Ok(())
         }
         /// Pay all accumulated jury rewards from the arbitration costs pool

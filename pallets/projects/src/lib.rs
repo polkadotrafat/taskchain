@@ -8,19 +8,24 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-use frame_support::{
+use frame_support::{ BoundedVec,
     dispatch::DispatchResult,
     traits::{Get},
 };
 use sp_runtime::DispatchError;
+use sp_runtime::traits::ConstU32;
 
 // Define the Arbitrable trait that the arbitration pallet will use to interact with projects
+pub type EvidenceUri = BoundedVec<u8, ConstU32<256>>;
 pub trait Arbitrable<ProjectId, Balance, AccountId, BlockNumber> {
     fn on_ruling(project_id: ProjectId, ruling: Ruling) -> DispatchResult; // Using local Ruling enum
     fn get_project_budget(project_id: ProjectId) -> Result<Balance, DispatchError>;
     fn get_project_parties(project_id: ProjectId) -> Result<(AccountId, AccountId), DispatchError>;
     fn set_project_status_in_dispute(project_id: ProjectId) -> DispatchResult;
     fn get_project_status(project_id: ProjectId) -> Result<ProjectStatus, DispatchError>;
+	/// Fetches the core evidence for a dispute: the client's requirements URI
+    /// and the freelancer's submission URI.
+    fn get_evidence_uris(project_id: ProjectId) -> Result<(EvidenceUri, EvidenceUri), DispatchError>;
 }
 
 #[frame_support::pallet]
@@ -554,5 +559,16 @@ pub mod pallet {
             let project = Projects::<T>::get(project_id).ok_or(Error::<T>::ProjectNotFound)?;
             Ok(project.status)
         }
+
+		fn get_evidence_uris(project_id: T::ProjectId) -> Result<(EvidenceUri, EvidenceUri), DispatchError> {
+			let project = Projects::<T>::get(project_id).ok_or(Error::<T>::ProjectNotFound)?;
+			
+			let requirements_uri = project.uri;
+			let submission_uri = project.work_submission
+				.ok_or(Error::<T>::NoWorkSubmitted)?
+				.uri;
+				
+			Ok((requirements_uri, submission_uri))
+		}
     }
 }
