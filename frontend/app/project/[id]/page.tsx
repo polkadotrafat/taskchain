@@ -2,12 +2,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useApi } from "@/app/context/ApiContext";
 import { useParams } from "next/navigation";
 import { InjectedAccountWithMeta } from "@polkadot/extension-inject/types";
 import axios from "axios";
 import { JuryVoteModal } from "@/app/components/JuryVoteModal";
-import { DisputeDetails } from "@/app/components/DisputeDetails";
+import { DisputeDetails as ImportedDisputeDetails } from "@/app/components/DisputeDetails";
 
 import { InitiateDisputeModal } from "@/app/components/InitiateDisputeModal";
 import { WorkSubmissionModal } from "@/app/components/WorkSubmissionModal";
@@ -66,8 +67,9 @@ function hexToString(hex: string): string {
 }
 
 
-// --- DisputeDetails Component ---
-const DisputeDetails = ({ project, currentUser, dispute }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta, dispute: Dispute | null }) => {
+// --- DisputeDetails Component Override ---
+// This component overrides the imported DisputeDetails to use the dispute data from the parent component
+const CustomDisputeDetails = ({ project, currentUser, dispute }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta, dispute: Dispute | null }) => {
   const { api, signer } = useApi();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -287,18 +289,22 @@ export default function ProjectPage() {
 
         // Fetch dispute data if project status is in dispute
         if (pd.status === 'InDispute') {
-          const disputeData = await api.query.arbitration.disputes(id);
-          if ((disputeData as any).isSome) {
-            const disputeJson = (disputeData as any).unwrap().toJSON() as any;
-            const processedDispute: Dispute = {
-              status: typeof disputeJson.status === 'object' ? Object.keys(disputeJson.status)[0] : disputeJson.status,
-              round: disputeJson.round,
-              ruling: disputeJson.ruling ? (typeof disputeJson.ruling === 'object' ? Object.keys(disputeJson.ruling)[0] : disputeJson.ruling) : null,
-              jurors: disputeJson.jurors || [],
-              evidenceUri: disputeJson.evidenceUri ? Buffer.from(disputeJson.evidenceUri.slice(2), 'hex').toString('utf8') : "",
-              startBlock: disputeJson.startBlock,
-            };
-            setDispute(processedDispute);
+          try {
+            const disputeData = await api.query.arbitration.disputes(id);
+            if ((disputeData as any).isSome) {
+              const disputeJson = (disputeData as any).unwrap().toJSON() as any;
+              const processedDispute: Dispute = {
+                status: typeof disputeJson.status === 'object' ? Object.keys(disputeJson.status)[0] : disputeJson.status,
+                round: disputeJson.round,
+                ruling: disputeJson.ruling ? (typeof disputeJson.ruling === 'object' ? Object.keys(disputeJson.ruling)[0] : disputeJson.ruling) : null,
+                jurors: disputeJson.jurors || [],
+                evidenceUri: disputeJson.evidenceUri ? Buffer.from(disputeJson.evidenceUri.slice(2), 'hex').toString('utf8') : "",
+                startBlock: disputeJson.startBlock,
+              };
+              setDispute(processedDispute);
+            }
+          } catch (err) {
+            console.error("Error fetching dispute data:", err);
           }
         }
 
@@ -320,7 +326,7 @@ export default function ProjectPage() {
         <>
           <ProjectActions project={project} currentUser={selectedAccount} hasApplied={hasApplied} submittedWork={submittedWork} dispute={dispute} />
           {project.status === 'InDispute' && (
-            <DisputeDetails project={project} currentUser={selectedAccount} dispute={dispute} />
+            <CustomDisputeDetails project={project} currentUser={selectedAccount} dispute={dispute} />
           )}
         </>
       )}
@@ -405,34 +411,6 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork, dispu
     const [isWorkSubmissionModalOpen, setIsWorkSubmissionModalOpen] = useState(false);
     const [isJuryVoteModalOpen, setIsJuryVoteModalOpen] = useState(false);
     const [error, setError] = useState("");
-
-    // Check if user is a juror for this dispute
-    useEffect(() => {
-      if (!api || project.status !== 'InDispute') return;
-
-      const fetchDispute = async () => {
-        try {
-          const disputeData = await api.query.arbitration.disputes(project.id);
-          if ((disputeData as any).isSome) {
-            const disputeJson = (disputeData as any).unwrap().toJSON() as any;
-            const processedDispute: Dispute = {
-              status: typeof disputeJson.status === 'object' ? Object.keys(disputeJson.status)[0] : disputeJson.status,
-              round: disputeJson.round,
-              ruling: disputeJson.ruling && typeof disputeJson.ruling === 'object' ? Object.keys(disputeJson.ruling)[0] : disputeJson.ruling,
-              jurors: disputeJson.jurors || [],
-              evidenceUri: disputeJson.evidenceUri ? Buffer.from(disputeJson.evidenceUri.slice(2), 'hex').toString('utf8') : "",
-              startBlock: disputeJson.startBlock,
-            };
-            console.log('Fetched dispute data:', processedDispute);
-            setDispute(processedDispute);
-          }
-        } catch (err) {
-          console.error("Error fetching dispute:", err);
-        }
-      };
-
-      fetchDispute();
-    }, [api, project.id, project.status]);
 
     const handleGenericAction = async (pallet: 'projects' | 'arbitration', extrinsic: string, args: any[]) => {
         if (!api || !signer) return;
@@ -558,13 +536,13 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork, dispu
             // to ensure we have the most recent status
             const disputeData = await api.query.arbitration.disputes(project.id);
 
-            if (disputeData.isNone) {
+            if ((disputeData as any).isNone) {
                 setError("Dispute not found for this project");
                 setIsSubmitting(false);
                 return;
             }
 
-            const dispute = disputeData.unwrap().toJSON() as any;
+            const dispute = (disputeData as any).unwrap().toJSON() as any;
             // Handle the status properly by checking if it's an object or direct value
             const rawStatus = dispute.status;
             let currentStatus = rawStatus;

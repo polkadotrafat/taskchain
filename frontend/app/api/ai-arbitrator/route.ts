@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
 
     // Validate required fields
-    if (!body.projectId || !body.clientClaim || !body.freelancerClaim) {
+    if (typeof body.projectId !== 'number' || !body.clientClaim || !body.freelancerClaim) {
       return Response.json(
         { error: 'projectId, clientClaim, and freelancerClaim are required' },
         { status: 400 }

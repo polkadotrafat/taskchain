@@ -8,7 +8,7 @@ Its core features are:
 * Multi-Tiered Decentralized Arbitration: pallet-arbitration provides a structured, economically rational dispute resolution process. If a client rejects work:
     1. AI Arbitration (Round 1): The freelancer can initiate a fast, cheap arbitration handled by an AI oracle.
     2. Human Jury (Round 2 & 3): The losing party can appeal the decision to a jury of high-reputation peers, selected from a pool of staked users. The process uses escalating bonds to deter frivolous appeals.
-* Economic Security: Jurors must stake tokens to participate. This "skin in the game" incentivizes fair and thoughtful voting, as misbehavior can lead to their stake being slashed.
+* Economic Security: Jurors must stake tokens to participate and they are paid for their participation from the projects fund. This "skin in the game" incentivizes fair and thoughtful voting, as misbehavior can lead to their stake being slashed.
 
 
 ## Getting Started

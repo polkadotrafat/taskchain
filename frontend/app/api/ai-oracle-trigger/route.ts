@@ -27,11 +27,13 @@ export async function POST(request: NextRequest) {
     console.log('Sudo account configured, parsing request body...');
     const body: TriggerAIArbitrationRequest = await request.json();
 
+    console.log('Request body parsed:', body);
+
     // Validate required fields
-    if (!body.projectId) {
-      console.error('projectId is required but not provided');
+    if (typeof body.projectId !== 'number') {
+      console.error('projectId is required and must be a number');
       return Response.json(
-        { error: 'projectId is required' },
+        { error: 'projectId is required and must be a number' },
         { status: 400 }
       );
     }
@@ -48,7 +50,7 @@ export async function POST(request: NextRequest) {
     try {
       // First, fetch the dispute from the blockchain to get current status
       console.log(`Fetching dispute data for project ID: ${body.projectId}`);
-      const disputeData = await api.query.arbitration.disputes(body.projectId);
+      const disputeData = await api.query.arbitration.disputes(body.projectId) as any;
 
       if (disputeData.isNone) {
         console.error(`Dispute not found for project ID: ${body.projectId}`);
@@ -102,7 +104,7 @@ export async function POST(request: NextRequest) {
 
       // Get project details to extract evidence URIs
       console.log(`Fetching project details for project ID: ${body.projectId}`);
-      const projectData = await api.query.projects.projects(body.projectId);
+      const projectData = await api.query.projects.projects(body.projectId) as any;
       if (projectData.isNone) {
         console.error(`Project not found for project ID: ${body.projectId}`);
         return Response.json(
@@ -188,7 +190,7 @@ export async function POST(request: NextRequest) {
       );
 
       const extrinsic = api.tx.sudo.sudo(call);
-      
+
       console.log(`Extrinsic created, submitting transaction to blockchain...`);
 
       // Submit the transaction using the sudo account
