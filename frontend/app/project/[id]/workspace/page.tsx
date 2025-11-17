@@ -316,17 +316,17 @@ const ContextualActionBox = ({ project, dispute, currentUser, onAppealClick }: {
                 <h2 className="text-xl font-bold text-gray-800 mb-2">Jury Duty Required</h2>
                 <p className="text-gray-600 mb-6">You have been selected as a juror for this round. Please review the evidence and cast your vote.</p>
                 <div className="flex space-x-4">
-                    <Button 
-                        onClick={() => handleTx(api!.tx.arbitration.castVote(project.id, 'ForClient'), 'Voted for Client')} 
+                    <Button
+                        onClick={() => handleTx(api!.tx.arbitration.castVote(project.id, 'ForClient'), 'Voted for Client')}
                         disabled={isSubmitting}
-                        className="flex-1 bg-gray-100 text-gray-800 hover:bg-gray-200 border border-gray-300"
+                        className="flex-1 bg-primary hover:bg-primary-hover text-white"
                     >
                         Vote Client
                     </Button>
-                    <Button 
-                        onClick={() => handleTx(api!.tx.arbitration.castVote(project.id, 'ForFreelancer'), 'Voted for Freelancer')} 
+                    <Button
+                        onClick={() => handleTx(api!.tx.arbitration.castVote(project.id, 'ForFreelancer'), 'Voted for Freelancer')}
                         disabled={isSubmitting}
-                        className="flex-1"
+                        className="flex-1 bg-primary hover:bg-primary-hover text-white"
                     >
                         Vote Freelancer
                     </Button>
@@ -344,7 +344,7 @@ const ContextualActionBox = ({ project, dispute, currentUser, onAppealClick }: {
                 <div className="bg-white shadow-lg border-l-4 border-yellow-500 rounded-lg p-6">
                     <h2 className="text-xl font-bold text-gray-800 mb-2">Ruling Against You</h2>
                     <p className="text-gray-600 mb-6">The latest ruling was not in your favor. You have the right to appeal to a higher-tier jury.</p>
-                    <Button onClick={onAppealClick} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white">
+                    <Button onClick={onAppealClick} className="w-full bg-primary hover:bg-primary-hover text-white">
                         Appeal Ruling
                     </Button>
                 </div>
@@ -399,7 +399,7 @@ const PublicActionCard = ({ title, description, buttonText, onClick, isSubmittin
     <div className="bg-white shadow-lg border-l-4 border-primary rounded-lg p-6">
         <h2 className="text-xl font-bold text-gray-800 mb-2">{title}</h2>
         <p className="text-gray-600 mb-6">{description}</p>
-        <Button onClick={onClick} disabled={isSubmitting} className="w-full">
+        <Button onClick={onClick} disabled={isSubmitting} className="w-full bg-primary hover:bg-primary-hover text-white">
             {buttonText}
         </Button>
         {txMessage && <p className="mt-2 text-center text-sm font-medium text-primary">{txMessage}</p>}

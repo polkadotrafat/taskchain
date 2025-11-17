@@ -64,7 +64,7 @@ export const AppealDisputeModal = ({ project, dispute, isOpen, onClose, onConfir
           <button
             type="button"
             onClick={handleSubmit}
-            className="px-4 py-2 text-sm font-medium text-white bg-yellow-600 rounded-md hover:bg-yellow-700 disabled:bg-gray-400"
+            className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary-hover disabled:bg-gray-400"
             disabled={isSubmitting}
           >
             {isSubmitting ? "Appealing..." : "Confirm & Appeal"}

@@ -126,7 +126,7 @@ export default function JuryDashboard() {
                     {dispute.status === 'Voting' && !dispute.hasVoted && (
                       <button
                         onClick={() => handleVote(dispute)}
-                        className="px-3 py-1 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+                        className="px-3 py-1 bg-primary text-white rounded-md text-sm hover:bg-primary-hover"
                       >
                         Cast Vote
                       </button>

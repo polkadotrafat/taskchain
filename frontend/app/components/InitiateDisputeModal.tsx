@@ -45,7 +45,10 @@ export const InitiateDisputeModal = ({ project, isOpen, onClose, onConfirm, stat
                     <strong>Required Bond:</strong> A small, percentage-based bond will be automatically reserved from your account to prevent spam. This bond is returned if you win the dispute.
                 </li>
                 <li>
-                    <strong>First Round:</strong> The dispute will first be sent to an automated AI Oracle for a quick, impartial ruling.
+                    <strong>AI Arbitration:</strong> The dispute will be automatically analyzed by an AI arbitrator that compares the project requirements with the work submission.
+                </li>
+                <li>
+                    <strong>First Round:</strong> The dispute will first be sent to an automated AI Oracle for a quick, impartial ruling based on the evidence.
                 </li>
                 <li>
                     <strong>Appeals:</strong> If you disagree with the AI's decision, you will have the option to appeal to a human jury.
@@ -68,7 +71,7 @@ export const InitiateDisputeModal = ({ project, isOpen, onClose, onConfirm, stat
           <button
             type="button"
             onClick={handleSubmit}
-            className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 disabled:bg-gray-400"
+            className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary-hover disabled:bg-gray-400"
             disabled={isSubmitting}
           >
             {isSubmitting ? "Initiating..." : "Confirm & Initiate Dispute"}

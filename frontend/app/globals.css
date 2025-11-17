@@ -6,8 +6,8 @@
 }
 
 @theme inline {
-  --color-primary: #0070f3;
-  --color-primary-hover: #0056b3;
+  --color-primary: #E6007A; /* Polkadot pink */
+  --color-primary-hover: #C60067; /* Darker shade of Polkadot pink */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);

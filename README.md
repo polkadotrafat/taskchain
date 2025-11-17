@@ -29,12 +29,17 @@ git clone https://github.com/polkadotrafat/taskchain.git
 cargo build --release
 ```
 
+#### Run Tests
+```
+cargo test
+```
+
 #### Run the parachain
 ```sh
  pop up ./network.toml
 ```
 
-You can intercat with the parachain at https://polkadot.js.org/apps/?rpc=ws://127.0.0.1:9933#/explorer
+You can interact with the parachain at https://polkadot.js.org/apps/?rpc=ws://127.0.0.1:9933#/explorer
 
 More instructions here
 > 👉 https://learn.onpop.io/v/appchains/guides/running-your-parachain
@@ -55,7 +60,7 @@ Dave Juror	"bottom drive obey lake curtain smoke basket hold race lonely fit wal
 Eve Juror	"bottom drive obey lake curtain smoke basket hold race lonely fit walk//Eve"
 ```
 
-Additionally inside the frontend folder copy env.example to .env and add the openai and pinata keys to make the frontend functional. 
+Additionally, inside the frontend folder copy env.example to .env and add the openai and pinata keys to make the frontend functional. 
 
 ### Documentation
 
@@ -140,7 +145,7 @@ This pallet manages user reputation. It tracks metrics like projects completed, 
 
 
 
-### Support
+### Contact
 
 Rafat Hussain
 Email rafat.hsn@gmail.com

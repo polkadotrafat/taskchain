@@ -227,7 +227,7 @@ const JurorStaking = ({ reputation, jurorConfig }: { reputation: ReputationData,
             {isStaked && (
                 <div>
                     <p className="mb-4 text-gray-600">You are currently staked as a juror. You can unstake at any time.</p>
-                    <button onClick={handleUnstake} disabled={isSubmitting} className="action-button bg-red-500 hover:bg-red-600">
+                    <button onClick={handleUnstake} disabled={isSubmitting} className="action-button bg-primary hover:bg-primary-hover text-white">
                         {isSubmitting ? 'Unstaking...' : 'Unstake'}
                     </button>
                 </div>
@@ -236,7 +236,7 @@ const JurorStaking = ({ reputation, jurorConfig }: { reputation: ReputationData,
                 <div>
                     <p className="mb-4 text-gray-600">You are eligible to become a juror. Stake the required amount to join the juror pool.</p>
                     <p className="mb-2 text-sm text-gray-500">Required Stake (Bronze): {jurorConfig.min_stake_bronze}</p>
-                    <button onClick={handleStake} disabled={isSubmitting} className="action-button">
+                    <button onClick={handleStake} disabled={isSubmitting} className="action-button bg-primary hover:bg-primary-hover text-white">
                         {isSubmitting ? 'Staking...' : 'Become a Juror'}
                     </button>
                 </div>

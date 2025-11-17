@@ -34,11 +34,11 @@ export const DisputeDetails = ({ project, currentUser }: DisputeDetailsProps) =>
 
         const disputeJson = (disputeData as any).unwrap().toJSON() as any;
 
-        // Process the dispute data
+        // Process the dispute data - keep as object to preserve proper type, or extract value
         const processedDispute: Dispute = {
-          status: Object.keys(disputeJson.status)[0],
+          status: typeof disputeJson.status === 'object' ? Object.keys(disputeJson.status)[0] : disputeJson.status,
           round: disputeJson.round,
-          ruling: disputeJson.ruling ? Object.keys(disputeJson.ruling)[0] : null,
+          ruling: disputeJson.ruling && typeof disputeJson.ruling === 'object' ? Object.keys(disputeJson.ruling)[0] : disputeJson.ruling,
           jurors: disputeJson.jurors || [],
           evidenceUri: disputeJson.evidenceUri ? Buffer.from(disputeJson.evidenceUri.slice(2), 'hex').toString('utf8') : "",
           startBlock: disputeJson.startBlock,
@@ -118,7 +118,15 @@ export const DisputeDetails = ({ project, currentUser }: DisputeDetailsProps) =>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <div className="bg-gray-50 p-3 rounded-md">
           <h4 className="font-semibold text-gray-500">Status</h4>
-          <p className="text-lg font-semibold text-gray-900">{dispute.status}</p>
+          <p className="text-lg font-semibold text-gray-900">
+            {typeof dispute.status === 'object' ? Object.keys(dispute.status)[0] :
+             dispute.status === 0 ? 'AiProcessing' :
+             dispute.status === 1 ? 'Appealable' :
+             dispute.status === 2 ? 'Voting' :
+             dispute.status === 3 ? 'Finalized' :
+             dispute.status === 4 ? 'Resolved' :
+             dispute.status}
+          </p>
         </div>
         <div className="bg-gray-50 p-3 rounded-md">
           <h4 className="font-semibold text-gray-500">Round</h4>
@@ -133,6 +141,35 @@ export const DisputeDetails = ({ project, currentUser }: DisputeDetailsProps) =>
           <p className="text-sm font-mono text-gray-900 break-all">{dispute.evidenceUri}</p>
         </div>
       </div>
+
+      {/* AI Ruling Information - Display when available */}
+      {(dispute.status === 'Appealable' ||
+        (typeof dispute.status === 'object' && Object.keys(dispute.status)[0] === 'Appealable') ||
+        dispute.status === 1) &&
+       dispute.round === 1 && (
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <h4 className="font-semibold text-blue-800 mb-2">AI Arbitration Ruling</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div>
+              <span className="font-medium text-gray-700">Ruling:</span>
+              <span className="ml-2 font-semibold">
+                {dispute.ruling === 'ClientWins' ? 'Client Wins' :
+                 dispute.ruling === 'FreelancerWins' ? 'Freelancer Wins' :
+                 typeof dispute.ruling === 'object' ? Object.keys(dispute.ruling)[0] :
+                 'Pending'}
+              </span>
+            </div>
+            <div>
+              <span className="font-medium text-gray-700">Round:</span>
+              <span className="ml-2">{dispute.round} (AI Round)</span>
+            </div>
+          </div>
+          <p className="mt-2 text-gray-600">
+            This ruling was made by an AI arbitrator who analyzed the project requirements and submitted work.
+            You may appeal this decision if you disagree.
+          </p>
+        </div>
+      )}
 
       {/* Jurors section */}
       {dispute.jurors.length > 0 && (
@@ -157,9 +194,9 @@ export const DisputeDetails = ({ project, currentUser }: DisputeDetailsProps) =>
       {/* Actions */}
       <div className="mt-4">
         {dispute.status === 'Appealable' && (
-          <button 
+          <button
             onClick={() => setIsAppealModalOpen(true)}
-            className="bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-md"
+            className="bg-primary hover:bg-primary-hover text-white font-medium py-2 px-4 rounded-md"
           >
             Appeal Ruling
           </button>

@@ -66,6 +66,121 @@ function hexToString(hex: string): string {
 }
 
 
+// --- DisputeDetails Component ---
+const DisputeDetails = ({ project, currentUser, dispute }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta, dispute: Dispute | null }) => {
+  const { api, signer } = useApi();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [activeDisputes, setActiveDisputes] = useState<any[]>([]);
+
+  // If dispute is already provided, use it
+  if (dispute) {
+    return (
+      <div className="bg-white shadow-md rounded-lg p-6 mt-4">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">Dispute Details</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div className="bg-gray-50 p-3 rounded-md">
+            <h4 className="font-semibold text-gray-500">Status</h4>
+            <p className="text-lg font-semibold text-gray-900">{dispute.status}</p>
+          </div>
+          <div className="bg-gray-50 p-3 rounded-md">
+            <h4 className="font-semibold text-gray-500">Round</h4>
+            <p className="text-lg font-semibold text-gray-900">Round {dispute.round}</p>
+          </div>
+          <div className="bg-gray-50 p-3 rounded-md">
+            <h4 className="font-semibold text-gray-500">Ruling</h4>
+            <p className="text-lg font-semibold text-gray-900">{dispute.ruling || "Pending"}</p>
+          </div>
+          <div className="bg-gray-50 p-3 rounded-md">
+            <h4 className="font-semibold text-gray-500">Evidence URI</h4>
+            <p className="text-sm font-mono text-gray-900 break-all">{dispute.evidenceUri}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback to original fetch logic if no dispute was provided
+  useEffect(() => {
+    if (!api || !currentUser) return;
+
+    const fetchDispute = async () => {
+      setIsLoading(true);
+      try {
+        const disputeEntries = await api.query.arbitration.disputes.entries();
+
+        const disputes = disputeEntries.map(([key, value]: [any, any]) => {
+          const id = Number(key.args[0].toString());
+          const disputeData = value;
+
+          if (disputeData.isSome) {
+            const dd = (disputeData as any).unwrap().toJSON() as any;
+
+            // Check if user is a juror in this dispute
+            const isJuror = dd.jurors && Array.isArray(dd.jurors) &&
+              dd.jurors.some((juror: [string, boolean]) => juror[0] === currentUser.address);
+
+            if (isJuror) {
+              return {
+                id,
+                projectId: id,
+                status: Object.keys(dd.status)[0],
+                round: dd.round,
+                ruling: dd.ruling ? Object.keys(dd.ruling)[0] : null,
+                evidenceUri: dd.evidenceUri ? Buffer.from(dd.evidenceUri.slice(2), 'hex').toString('utf8') : "",
+                startBlock: dd.startBlock,
+                isJuror: true
+              };
+            }
+          }
+          return null;
+        }).filter(Boolean);
+
+        setActiveDisputes(disputes as any);
+      } catch (err: any) {
+        console.error("Error fetching dispute:", err);
+        setError("Failed to fetch dispute data");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchDispute();
+  }, [api, currentUser]);
+
+  if (isLoading) return <div className="text-center p-4">Loading dispute details...</div>;
+  if (error) return <div className="text-center p-4 text-red-500">{error}</div>;
+
+  return (
+    <div className="bg-white shadow-md rounded-lg p-6 mt-4">
+      <h2 className="text-xl font-bold text-gray-800 mb-4">My Jury Duties</h2>
+      {activeDisputes.length > 0 ? (
+        <div className="space-y-4">
+          {activeDisputes.map((dispute: any) => (
+            <div key={dispute.id} className="border border-gray-200 rounded-md p-4">
+              <div className="flex justify-between">
+                <span className="font-medium">Dispute for Project #{dispute.projectId}</span>
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                  Round {dispute.round} - {dispute.status}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mt-2">Status: {dispute.status}</p>
+              <Link
+                href={`/project/${dispute.projectId}`}
+                className="inline-block mt-2 text-primary hover:underline text-sm"
+              >
+                View Project Details
+              </Link>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-gray-500">You have no active jury duties.</p>
+      )}
+    </div>
+  );
+}
+
 // --- Main Page Component ---
 export default function ProjectPage() {
   const { api, selectedAccount, signer } = useApi();
@@ -77,6 +192,7 @@ export default function ProjectPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [hasApplied, setHasApplied] = useState(false);
+  const [dispute, setDispute] = useState<Dispute | null>(null);
 
   // --- Data Fetching ---
   useEffect(() => {
@@ -169,6 +285,23 @@ export default function ProjectPage() {
           setHasApplied(applicantsList.includes(selectedAccount.address));
         }
 
+        // Fetch dispute data if project status is in dispute
+        if (pd.status === 'InDispute') {
+          const disputeData = await api.query.arbitration.disputes(id);
+          if ((disputeData as any).isSome) {
+            const disputeJson = (disputeData as any).unwrap().toJSON() as any;
+            const processedDispute: Dispute = {
+              status: typeof disputeJson.status === 'object' ? Object.keys(disputeJson.status)[0] : disputeJson.status,
+              round: disputeJson.round,
+              ruling: disputeJson.ruling ? (typeof disputeJson.ruling === 'object' ? Object.keys(disputeJson.ruling)[0] : disputeJson.ruling) : null,
+              jurors: disputeJson.jurors || [],
+              evidenceUri: disputeJson.evidenceUri ? Buffer.from(disputeJson.evidenceUri.slice(2), 'hex').toString('utf8') : "",
+              startBlock: disputeJson.startBlock,
+            };
+            setDispute(processedDispute);
+          }
+        }
+
         setIsLoading(false);
       });
     };
@@ -182,12 +315,12 @@ export default function ProjectPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <ProjectDetails project={project} />
+      <ProjectDetails project={project} dispute={dispute} />
       {selectedAccount && signer && (
         <>
-          <ProjectActions project={project} currentUser={selectedAccount} hasApplied={hasApplied} submittedWork={submittedWork} />
+          <ProjectActions project={project} currentUser={selectedAccount} hasApplied={hasApplied} submittedWork={submittedWork} dispute={dispute} />
           {project.status === 'InDispute' && (
-            <DisputeDetails project={project} currentUser={selectedAccount} />
+            <DisputeDetails project={project} currentUser={selectedAccount} dispute={dispute} />
           )}
         </>
       )}
@@ -197,7 +330,7 @@ export default function ProjectPage() {
 
 
 // --- ProjectDetails Component ---
-const ProjectDetails = ({ project }: { project: ProjectDetailsType }) => {
+const ProjectDetails = ({ project, dispute }: { project: ProjectDetailsType, dispute: Dispute | null }) => {
   return (
     <div className="bg-white shadow-md rounded-lg p-8 mb-6">
       <div className="flex justify-between items-start mb-4">
@@ -232,18 +365,44 @@ const ProjectDetails = ({ project }: { project: ProjectDetailsType }) => {
           </p>
         </div>
       </div>
+
+      {/* AI Ruling Display - Show when dispute has an AI ruling */}
+      {project.status === 'InDispute' && dispute && dispute.ruling && dispute.round === 1 && (
+        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <div className="flex items-center">
+            <div className="mr-3">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            </div>
+            <div>
+              <h4 className="font-semibold text-blue-800">AI Arbitration Ruling</h4>
+              <div className="flex items-center mt-1">
+                <span className="text-lg font-bold">
+                  {dispute.ruling === 'ClientWins' ? 'Client Wins' : 'Freelancer Wins'}
+                </span>
+                <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
+                  Round 1 (AI)
+                </span>
+              </div>
+            </div>
+          </div>
+          <p className="mt-2 text-sm text-gray-600">
+            This ruling was made by an AI arbitrator after analyzing the project requirements and submitted work.
+          </p>
+        </div>
+      )}
     </div>
   );
 };
 
 
 // --- ProjectActions Component ---
-const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta, hasApplied: boolean, submittedWork: SubmittedWork | null }) => {
+const ProjectActions = ({ project, currentUser, hasApplied, submittedWork, dispute }: { project: ProjectDetailsType, currentUser: InjectedAccountWithMeta, hasApplied: boolean, submittedWork: SubmittedWork | null, dispute: Dispute | null }) => {
     const { api, signer } = useApi();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
     const [isWorkSubmissionModalOpen, setIsWorkSubmissionModalOpen] = useState(false);
-    const [dispute, setDispute] = useState<Dispute | null>(null);
     const [isJuryVoteModalOpen, setIsJuryVoteModalOpen] = useState(false);
     const [error, setError] = useState("");
 
@@ -257,13 +416,14 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
           if ((disputeData as any).isSome) {
             const disputeJson = (disputeData as any).unwrap().toJSON() as any;
             const processedDispute: Dispute = {
-              status: Object.keys(disputeJson.status)[0],
+              status: typeof disputeJson.status === 'object' ? Object.keys(disputeJson.status)[0] : disputeJson.status,
               round: disputeJson.round,
-              ruling: disputeJson.ruling ? Object.keys(disputeJson.ruling)[0] : null,
+              ruling: disputeJson.ruling && typeof disputeJson.ruling === 'object' ? Object.keys(disputeJson.ruling)[0] : disputeJson.ruling,
               jurors: disputeJson.jurors || [],
               evidenceUri: disputeJson.evidenceUri ? Buffer.from(disputeJson.evidenceUri.slice(2), 'hex').toString('utf8') : "",
               startBlock: disputeJson.startBlock,
             };
+            console.log('Fetched dispute data:', processedDispute);
             setDispute(processedDispute);
           }
         } catch (err) {
@@ -315,7 +475,7 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
             extrinsic.signAndSend(
                 currentUser.address,
                 { signer },
-                ({ status, events, dispatchError }) => {
+                async ({ status, events, dispatchError }) => {
                     if (status.isInBlock) {
                         console.log(`Transaction included in block: ${status.asInBlock}`);
                     }
@@ -355,10 +515,18 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
                         });
 
                         setIsSubmitting(false);
+                        console.log(`Dispute transaction finalized for project ${project.id}. Success: ${success}, DisputeCreated: ${disputeCreated}`);
+
                         if (success && disputeCreated) {
                             setIsDisputeModalOpen(false);
-                            window.location.reload(); // Refresh to show updated status
+                            console.log('Dispute creation successful. Dispute is now in AiProcessing status.');
+                            console.log('AI arbitration can be started by either party by clicking the "Run AI Arbitration" button.');
+
+                            // Refresh the page to show updated status
+                            console.log('Refreshing page to show updated dispute status...');
+                            window.location.reload();
                         } else {
+                            console.error('Dispute creation failed - transaction not successful');
                             setError("Transaction completed but dispute may not have been created successfully");
                         }
                     }
@@ -372,6 +540,120 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
             setError(err.message || "An unknown error occurred.");
             setIsSubmitting(false);
             console.error("Error initiating dispute:", err);
+        }
+    };
+
+    // Function to trigger AI arbitration
+    const handleAIArbitration = async () => {
+        if (!api || !signer) return;
+
+        console.log('Starting AI arbitration for project:', project.id);
+
+        setIsSubmitting(true);
+        setError(""); // Clear any previous errors
+
+        try {
+            console.log('Verifying dispute status from blockchain...');
+            // Fetch the current dispute state directly from the blockchain
+            // to ensure we have the most recent status
+            const disputeData = await api.query.arbitration.disputes(project.id);
+
+            if (disputeData.isNone) {
+                setError("Dispute not found for this project");
+                setIsSubmitting(false);
+                return;
+            }
+
+            const dispute = disputeData.unwrap().toJSON() as any;
+            // Handle the status properly by checking if it's an object or direct value
+            const rawStatus = dispute.status;
+            let currentStatus = rawStatus;
+
+            // If status is an object (like {AiProcessing: null}), extract the key
+            if (typeof rawStatus === 'object' && rawStatus !== null) {
+                currentStatus = Object.keys(rawStatus)[0];
+            } else if (typeof rawStatus === 'number') {
+                // If status is a number, convert back to string representation
+                const statusMap: Record<number, string> = {
+                    0: 'AiProcessing',
+                    1: 'Appealable',
+                    2: 'Voting',
+                    3: 'Finalized',
+                    4: 'Resolved'
+                };
+                currentStatus = statusMap[rawStatus] || rawStatus.toString();
+            }
+
+            const currentRound = dispute.round;
+
+            console.log(`Current dispute status: ${currentStatus}, round: ${currentRound}`);
+
+            // Only allow AI arbitration for round 1 in AiProcessing status
+            if (currentRound !== 1 || currentStatus !== 'AiProcessing') {
+                setError(`AI arbitration is only available for round 1 in AiProcessing status. Current status: ${currentStatus}, round: ${currentRound}`);
+                setIsSubmitting(false);
+                return;
+            }
+
+            console.log('Sending AI arbitration trigger request...');
+            try {
+                // Create an AbortController for timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+                const response = await fetch('/api/ai-oracle-trigger', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ projectId: project.id }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                console.log('Received response from AI arbitration API:', response.status);
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('AI arbitration failed:', errorData.error || 'Unknown error');
+                    setError(`AI arbitration failed: ${errorData.error || 'Server error'}`);
+                    setIsSubmitting(false);
+                    return;
+                }
+
+                const result = await response.json();
+                console.log('AI arbitration completed:', result);
+            } catch (fetchError: any) {
+                if (fetchError.name === 'AbortError') {
+                    console.error('AI arbitration request timed out');
+                    setError('AI arbitration request timed out. Please try again.');
+                } else {
+                    console.error('Network error in AI arbitration:', fetchError);
+                    setError(`Network error: ${fetchError.message}`);
+                }
+                setIsSubmitting(false);
+                return;
+            }
+
+            console.log('AI arbitration completed successfully, checking status again...');
+            // Don't immediately reload, let the user see the result
+            // The useEffect will update the UI when the dispute status changes
+            // Refresh the page after a short delay to show updated status
+            setTimeout(() => {
+                console.log('Refreshing page after AI arbitration completed...');
+                window.location.reload();
+            }, 2000);
+
+            // Set submitting to false after a short delay to show the success state briefly
+            setTimeout(() => {
+                setIsSubmitting(false);
+            }, 1000);
+
+        } catch (err: any) {
+            console.error("Error in AI arbitration:", err);
+            setError(err.message || "An unknown error occurred during AI arbitration");
+            setIsSubmitting(false);
         }
     };
 
@@ -480,14 +762,14 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
                                 <button
                                     onClick={() => handleGenericAction('projects', 'acceptWork', [project.id, 4])}
                                     disabled={isSubmitting}
-                                    className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 disabled:bg-gray-400"
+                                    className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
                                 >
                                     {isSubmitting ? 'Accepting...' : 'Accept Work (4/5)'}
                                 </button>
                                 <button
                                     onClick={() => handleGenericAction('projects', 'rejectWork', [project.id, "ipfs://reason"])}
                                     disabled={isSubmitting}
-                                    className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 disabled:bg-gray-400"
+                                    className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
                                 >
                                     {isSubmitting ? 'Rejecting...' : 'Reject Work'}
                                 </button>
@@ -498,7 +780,7 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
                         <button
                             onClick={() => setIsDisputeModalOpen(true)}
                             disabled={isSubmitting}
-                            className="px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 disabled:bg-gray-400"
+                            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
                         >
                             {isSubmitting ? 'Preparing...' : 'Initiate Dispute'}
                         </button>
@@ -507,7 +789,7 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
                         <button
                             onClick={() => setIsJuryVoteModalOpen(true)}
                             disabled={isSubmitting}
-                            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-400"
+                            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
                         >
                             Cast Jury Vote
                         </button>
@@ -516,24 +798,170 @@ const ProjectActions = ({ project, currentUser, hasApplied, submittedWork }: { p
                         <button
                             onClick={() => handleGenericAction('arbitration', 'enforceFinalRuling', [project.id])}
                             disabled={isSubmitting}
-                            className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 disabled:bg-gray-400"
+                            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
                         >
                             {isSubmitting ? 'Processing...' : 'Enforce Final Ruling'}
+                        </button>
+                    )}
+                    {/* Appeal button - visible to the losing party when dispute is Appealable */}
+                    {project.status === 'InDispute' && (() => {
+                      // Process the status the same way as in other places
+                      const rawStatus = dispute?.status;
+                      let currentStatus = rawStatus;
+
+                      if (typeof rawStatus === 'object' && rawStatus !== null) {
+                          currentStatus = Object.keys(rawStatus)[0];
+                      } else if (typeof rawStatus === 'number') {
+                          const statusMap: Record<number, string> = {
+                              0: 'AiProcessing',
+                              1: 'Appealable',
+                              2: 'Voting',
+                              3: 'Finalized',
+                              4: 'Resolved'
+                          };
+                          currentStatus = statusMap[rawStatus] || rawStatus.toString();
+                      }
+
+                      // Only show the appeal button if status is Appealable, it's round 1, and the current user is the losing party
+                      if (currentStatus === 'Appealable' && dispute?.round === 1) {
+                        // Determine the losing party based on the ruling
+                        const isClient = project.client === currentUser.address;
+                        const isFreelancer = project.freelancer === currentUser.address;
+                        const losingParty = dispute.ruling === 'ClientWins' ? project.freelancer : project.client;
+                        const isLosingParty = currentUser.address === losingParty;
+
+                        if (isLosingParty) {
+                          return (
+                            <button
+                              onClick={() => handleGenericAction('arbitration', 'appealRuling', [project.id])}
+                              disabled={isSubmitting}
+                              className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
+                            >
+                              {isSubmitting ? 'Appealing...' : 'Appeal Ruling'}
+                            </button>
+                          );
+                        }
+                      }
+                      return false; // Return false to render nothing if conditions aren't met
+                    })()}
+                    {project.status === 'InDispute' && dispute?.round === 1 && (() => {
+                      // Process the status the same way as in the function
+                      const rawStatus = dispute.status;
+                      let currentStatus = rawStatus;
+
+                      if (typeof rawStatus === 'object' && rawStatus !== null) {
+                          currentStatus = Object.keys(rawStatus)[0];
+                      } else if (typeof rawStatus === 'number') {
+                          const statusMap: Record<number, string> = {
+                              0: 'AiProcessing',
+                              1: 'Appealable',
+                              2: 'Voting',
+                              3: 'Finalized',
+                              4: 'Resolved'
+                          };
+                          currentStatus = statusMap[rawStatus] || rawStatus.toString();
+                      }
+
+                      return currentStatus === 'AiProcessing';
+                    })() && (
+                        <button
+                            onClick={handleAIArbitration}
+                            disabled={isSubmitting}
+                            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
+                        >
+                            {isSubmitting ? 'Running AI Arbitration...' : 'Run AI Arbitration'}
                         </button>
                     )}
                     {project.status === 'InDispute' && isJuror && dispute?.status === 'Voting' && (
                         <button
                             onClick={() => handleGenericAction('arbitration', 'finalizeRound', [project.id])}
                             disabled={isSubmitting}
-                            className="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 disabled:bg-gray-400"
+                            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover disabled:bg-gray-400"
                         >
                             {isSubmitting ? 'Finalizing...' : 'Finalize Round'}
                         </button>
                     )}
                 </div>
                 {error && <p className="text-red-500 mt-4">{error}</p>}
-                {project.status === 'InDispute' && (
-                    <p className="text-gray-500 mt-4">This project is currently in dispute. Actions may be limited depending on your role.</p>
+                {project.status === 'InDispute' && dispute && (
+                    <div className="mt-4">
+                        <p className="text-gray-500">This project is currently in dispute. Actions may be limited depending on your role.</p>
+                        {(() => {
+                          // Process the status the same way as in the function
+                          const rawStatus = dispute.status;
+                          let currentStatus = rawStatus;
+
+                          if (typeof rawStatus === 'object' && rawStatus !== null) {
+                              currentStatus = Object.keys(rawStatus)[0];
+                          } else if (typeof rawStatus === 'number') {
+                              const statusMap: Record<number, string> = {
+                                  0: 'AiProcessing',
+                                  1: 'Appealable',
+                                  2: 'Voting',
+                                  3: 'Finalized',
+                                  4: 'Resolved'
+                              };
+                              currentStatus = statusMap[rawStatus] || rawStatus.toString();
+                          }
+
+                          return currentStatus === 'AiProcessing' && dispute.round === 1;
+                        })() && (
+                            <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                                <p className="text-yellow-800 font-medium">AI Arbitration Ready</p>
+                                <p className="text-sm text-yellow-700">The dispute is ready for AI arbitration. Either party can initiate the AI review process.</p>
+                            </div>
+                        )}
+                        {(() => {
+                          // Process the status the same way as in the function
+                          const rawStatus = dispute.status;
+                          let currentStatus = rawStatus;
+
+                          if (typeof rawStatus === 'object' && rawStatus !== null) {
+                              currentStatus = Object.keys(rawStatus)[0];
+                          } else if (typeof rawStatus === 'number') {
+                              const statusMap: Record<number, string> = {
+                                  0: 'AiProcessing',
+                                  1: 'Appealable',
+                                  2: 'Voting',
+                                  3: 'Finalized',
+                                  4: 'Resolved'
+                              };
+                              currentStatus = statusMap[rawStatus] || rawStatus.toString();
+                          }
+
+                          return currentStatus === 'AiProcessing' && dispute.round !== 1;
+                        })() && (
+                            <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                                <p className="text-yellow-800 font-medium">Round {dispute.round} Processing</p>
+                                <p className="text-sm text-yellow-700">This round is currently being processed.</p>
+                            </div>
+                        )}
+                        {(() => {
+                          // Process the status the same way as in the function
+                          const rawStatus = dispute.status;
+                          let currentStatus = rawStatus;
+
+                          if (typeof rawStatus === 'object' && rawStatus !== null) {
+                              currentStatus = Object.keys(rawStatus)[0];
+                          } else if (typeof rawStatus === 'number') {
+                              const statusMap: Record<number, string> = {
+                                  0: 'AiProcessing',
+                                  1: 'Appealable',
+                                  2: 'Voting',
+                                  3: 'Finalized',
+                                  4: 'Resolved'
+                              };
+                              currentStatus = statusMap[rawStatus] || rawStatus.toString();
+                          }
+
+                          return currentStatus === 'Appealable' && dispute.round === 1;
+                        })() && (
+                            <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                <p className="text-blue-800 font-medium">AI Ruling: {dispute.ruling === 'ClientWins' ? 'Client Wins' : 'Freelancer Wins'}</p>
+                                <p className="text-sm text-blue-700">The AI arbitrator has reviewed this dispute and made a ruling. This decision can be appealed.</p>
+                            </div>
+                        )}
+                    </div>
                 )}
             </div>
         </>

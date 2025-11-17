@@ -114,9 +114,9 @@ export const JuryVoteModal = ({ project, dispute, isOpen, onClose, currentUser }
             onClick={handleSubmit}
             disabled={isSubmitting || !selectedVote}
             className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
-              isSubmitting || !selectedVote 
-                ? 'bg-gray-400' 
-                : 'bg-blue-600 hover:bg-blue-700'
+              isSubmitting || !selectedVote
+                ? 'bg-gray-400'
+                : 'bg-primary hover:bg-primary-hover'
             }`}
           >
             {isSubmitting ? "Submitting..." : "Cast Vote"}

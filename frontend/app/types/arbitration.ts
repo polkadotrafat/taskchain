@@ -3,6 +3,7 @@ export interface DisputeEvidence {
   projectId: number;
   clientClaim: string;
   freelancerClaim: string;
+  projectRequirementsUri?: string;  // The URI of the original project requirements
   workSubmissions?: Array<{
     contentHash: string;
     uri: string;

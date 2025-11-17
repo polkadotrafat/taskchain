@@ -23,7 +23,7 @@ export const Header = () => {
           </Link>
           <Link 
             href="/create-project" 
-            className="bg-primary px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors duration-200"
+            className="text-text-secondary hover:text-primary transition-colors duration-200"
           >
             Create Project
           </Link>
